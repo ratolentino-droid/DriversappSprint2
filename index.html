@@ -678,12 +678,12 @@
               <div>
                 <div class="flex justify-between items-center mb-1.5">
                   <label class="block text-[10px] font-bold text-slate-700 uppercase tracking-wider">Receiver Signature *</label>
-                  <button type="button" onclick="clearSignature()" class="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold transition">Clear</button>
+                  <button type="button" id="btn-clear-signature" onclick="clearSignature()" class="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold transition">Clear</button>
                 </div>
-                <div id="sig-container" class="border-2 border-dashed border-slate-300 rounded-lg overflow-hidden bg-white relative transition-all duration-300">
-                  <canvas id="sig-canvas" width="350" height="130" class="w-full h-32 touch-none cursor-crosshair"></canvas>
+                <div id="sig-container" class="border-2 border-dashed border-slate-300 rounded-lg overflow-hidden bg-white relative transition-all duration-300 cursor-pointer" role="button" tabindex="0" aria-label="Open Receiver Signature" onclick="openSignatureModal()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openSignatureModal();}">
+                  <div class="w-full h-32"><img id="sig-preview" class="hidden w-full h-full object-contain" alt="Saved receiver signature"></div>
                   <div id="sig-placeholder" class="absolute inset-0 flex items-center justify-center text-xs text-slate-400 font-medium pointer-events-none">
-                    Sign inside box
+                    Tap to sign
                   </div>
                   <div id="sig-disabled-overlay" class="hidden absolute inset-0 bg-slate-100/95 backdrop-blur-sm flex flex-col items-center justify-center text-slate-500 z-10 pointer-events-none transition-opacity">
                     <i class="fa-solid fa-ban text-xl mb-1 text-slate-400"></i>
@@ -725,6 +725,22 @@
             <i class="fa-solid fa-circle-check"></i>
             <span>Complete Delivery</span>
         </button>
+      </div>
+    </div>
+
+    <!-- MODAL: RECEIVER SIGNATURE (Step 4 only) — rotated within the portrait mobile app -->
+    <div id="modal-signature" class="hidden absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm overflow-hidden" style="container-type:size;">
+      <div class="absolute left-1/2 top-1/2 bg-white rounded-3xl p-3 shadow-2xl flex flex-col gap-2 overflow-hidden" style="position:absolute!important;width:calc(100cqh - 64px);height:calc(100cqw - 56px);transform:translate(-50%,-50%) rotate(90deg);">
+        <div class="flex justify-end shrink-0">
+          <button type="button" id="btn-modal-sig-close" onclick="cancelSignatureModal()" aria-label="Close signature without saving" title="Close" class="text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg p-1.5 transition flex items-center justify-center">
+            <i class="fa-solid fa-xmark text-lg"></i>
+          </button>
+        </div>
+        <canvas id="sig-canvas" width="700" height="160" class="w-full flex-1 min-h-0 border-2 border-dashed border-slate-300 rounded-lg bg-white touch-none cursor-crosshair" aria-label="Signature drawing area"></canvas>
+        <div class="flex justify-end items-center gap-2 shrink-0">
+          <button type="button" id="btn-modal-sig-clear" onclick="clearModalSignature()" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 px-2 py-2">Clear</button>
+          <button type="button" id="btn-modal-sig-save" onclick="saveSignatureModal()" disabled class="bg-[#f29900] hover:bg-[#e68a00] text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition disabled:opacity-40 disabled:cursor-not-allowed">Save</button>
+        </div>
       </div>
     </div>
 
@@ -1769,6 +1785,9 @@
       document.getElementById('remark-other-text').value = '';
       document.getElementById('remark-char-count').innerText = '0';
       isSigDisabled = false;
+      savedSignature = null;
+      cancelSignatureModal();
+      updateSignaturePreview();
       handleRemarksChange('reset');
       
       resetStepUI(1); resetStepUI(2); resetStepUI(3); resetStepUI(4);
@@ -2118,38 +2137,42 @@
       }
     }
 
-    /* STEP 4: Signature Canvas, Remarks & Validation */
+    /* STEP 4: Receiver Signature modal, preview, Remarks & Validation */
     let canvas = null, ctx = null, isDrawing = false;
+    let savedSignature = null, draftSignatureHasInk = false, sigLoadToken = 0;
 
     function initSignatureCanvas() {
-      canvas = document.getElementById('sig-canvas');
-      if (!canvas) return;
+      const target = document.getElementById('sig-canvas');
+      if (!target || canvas === target) return;
+      canvas = target;
       ctx = canvas.getContext('2d');
       ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       ctx.strokeStyle = '#1e293b';
-
-      canvas.addEventListener('mousedown', startDraw);
-      canvas.addEventListener('mousemove', drawLine);
-      canvas.addEventListener('mouseup', stopDraw);
-      canvas.addEventListener('mouseleave', stopDraw);
-
-      canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDraw(e.touches[0]); }, { passive: false });
-      canvas.addEventListener('touchmove', (e) => { e.preventDefault(); drawLine(e.touches[0]); }, { passive: false });
-      canvas.addEventListener('touchend', stopDraw);
+      canvas.addEventListener('pointerdown', startDraw);
+      canvas.addEventListener('pointermove', drawLine);
+      canvas.addEventListener('pointerup', stopDraw);
+      canvas.addEventListener('pointercancel', stopDraw);
+      canvas.addEventListener('lostpointercapture', stopDraw);
     }
 
     function getCoords(e) {
       if (!canvas) return { x: 0, y: 0 };
       const rect = canvas.getBoundingClientRect();
-      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      // The canvas is rotated clockwise with its modal; map screen coordinates back to canvas space.
+      return {
+        x: (e.clientY - rect.top) * canvas.width / rect.height,
+        y: (rect.right - e.clientX) * canvas.height / rect.width
+      };
     }
 
     function startDraw(e) {
-      if (isSigDisabled || !ctx) return;
+      if (isSigDisabled || !ctx || document.getElementById('modal-signature').classList.contains('hidden')) return;
+      e.preventDefault();
+      sigLoadToken++; // Ignore a previously queued image restore if the user starts a new stroke.
       isDrawing = true;
-      const ph = document.getElementById('sig-placeholder');
-      if (ph) ph.classList.add('hidden');
+      if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
       const pos = getCoords(e);
       ctx.beginPath();
       ctx.moveTo(pos.x, pos.y);
@@ -2157,25 +2180,96 @@
 
     function drawLine(e) {
       if (!isDrawing || isSigDisabled || !ctx) return;
+      e.preventDefault();
       const pos = getCoords(e);
       ctx.lineTo(pos.x, pos.y);
       ctx.stroke();
+      draftSignatureHasInk = true;
+      document.getElementById('btn-modal-sig-save').disabled = false;
     }
 
-    function stopDraw() {
-      if (isDrawing && !isSigDisabled) {
-        state.epod.step4_sig = true;
-        validateStep4();
+    function stopDraw(e) {
+      if (!isDrawing) return;
+      if (e && e.type === 'pointerup' && !draftSignatureHasInk) {
+        const pos = getCoords(e);
+        ctx.lineTo(pos.x + 0.1, pos.y + 0.1);
+        ctx.stroke();
+        draftSignatureHasInk = true;
       }
       isDrawing = false;
+      document.getElementById('btn-modal-sig-save').disabled = !draftSignatureHasInk;
+    }
+
+    function updateSignaturePreview() {
+      const preview = document.getElementById('sig-preview');
+      const placeholder = document.getElementById('sig-placeholder');
+      if (savedSignature) {
+        preview.src = savedSignature;
+        preview.classList.remove('hidden');
+        placeholder.classList.add('hidden');
+      } else {
+        preview.removeAttribute('src');
+        preview.classList.add('hidden');
+        placeholder.classList.remove('hidden');
+      }
+    }
+
+    function openSignatureModal() {
+      if (isSigDisabled) return;
+      initSignatureCanvas();
+      document.getElementById('modal-signature').classList.remove('hidden');
+      // Match the drawing buffer to the rotated canvas's untransformed display size.
+      const width = Math.round(canvas.clientWidth), height = Math.round(canvas.clientHeight);
+      if (width > 0 && height > 0 && (canvas.width !== width || canvas.height !== height)) {
+        canvas.width = width;
+        canvas.height = height;
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = '#1e293b';
+      }
+      clearModalSignature();
+      if (savedSignature) {
+        const token = sigLoadToken;
+        const image = new Image();
+        image.onload = () => {
+          if (sigLoadToken !== token || document.getElementById('modal-signature').classList.contains('hidden')) return;
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          draftSignatureHasInk = true;
+          document.getElementById('btn-modal-sig-save').disabled = false;
+        };
+        image.src = savedSignature;
+      }
+    }
+
+    function clearModalSignature() {
+      sigLoadToken++;
+      isDrawing = false;
+      if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      draftSignatureHasInk = false;
+      document.getElementById('btn-modal-sig-save').disabled = true;
+    }
+
+    function cancelSignatureModal() {
+      sigLoadToken++;
+      isDrawing = false;
+      document.getElementById('modal-signature').classList.add('hidden');
+    }
+
+    function saveSignatureModal() {
+      if (isSigDisabled || !draftSignatureHasInk || !canvas) return;
+      savedSignature = canvas.toDataURL('image/png');
+      state.epod.step4_sig = true;
+      updateSignaturePreview();
+      cancelSignatureModal();
+      validateStep4();
     }
 
     function clearSignature() {
-      if (!ctx || !canvas) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (isSigDisabled) return;
+      savedSignature = null;
       state.epod.step4_sig = false;
-      const ph = document.getElementById('sig-placeholder');
-      if (ph) ph.classList.remove('hidden');
+      updateSignaturePreview();
       validateStep4();
     }
 
@@ -2224,11 +2318,14 @@
       isSigDisabled = declinedEl.checked || unavailableEl.checked;
       const sigContainer = document.getElementById('sig-container');
       const overlay = document.getElementById('sig-disabled-overlay');
-
+      const clearBtn = document.getElementById('btn-clear-signature');
+      if (clearBtn) {
+        clearBtn.disabled = isSigDisabled;
+        clearBtn.classList.toggle('opacity-40', isSigDisabled);
+      }
       if (isSigDisabled) {
         if (sigContainer) sigContainer.classList.add('opacity-50', 'pointer-events-none');
         if (overlay) overlay.classList.remove('hidden');
-        clearSignature(); 
       } else {
         if (sigContainer) sigContainer.classList.remove('opacity-50', 'pointer-events-none');
         if (overlay) overlay.classList.add('hidden');
@@ -2917,8 +3014,10 @@
       "Step 4: Signature & Remarks Block": "#epod-step-4",
       "Step 4: Header & Step Number": "#epod-step-4 > div:first-child",
       "Step 4: Receiver Full Name Input": "#receiver-name",
-      "Step 4: E-Signature Canvas": "#sig-container",
-      "Step 4: Clear Signature Button": "button[onclick='clearSignature()']",
+      "Step 4: Receiver Signature": "#sig-container",
+      "Signature Modal": "#modal-signature > div",
+      "Signature Modal Close (X) Icon": "#btn-modal-sig-close",
+      "Step 4: Clear Signature Button": "#btn-clear-signature",
       "Step 4: Signature Disabled Overlay": "#sig-disabled-overlay",
       "Step 4: Remarks Checkbox Group": "#epod-step-4 .space-y-2\\.5",
       "Step 4: Remarks Other Textarea": "#remark-other-container",
@@ -3658,11 +3757,11 @@
           },
           "Step 4: Signature & Remarks Block": {
             type: "Workflow Step Container (Separate Page)",
-            description: "Dedicated final page for capturing receiver full name, digital e-signature, and exception remarks. Includes text inputs, signature canvas, clear button, checkboxes, and textarea.",
-            behavior: "Accessed only after tapping Next on Step 3. Enforces name and signature/remark before enabling final submission.",
-            interaction: "Enter name, draw signature or select exception remark checkboxes.",
-            sysResponse: "Validates fields. Locks signature pad dynamically if 'Customer declined' or 'Unavailable' is checked.",
-            states: "Active, Validated, Signature Disabled (Canvas overlay active).",
+            description: "Dedicated final page for receiver name, a clickable signature preview, and exception remarks. The receiver signs only in the modal; all other fields remain unchanged.",
+            behavior: "Accessed after Step 3. Tap signature box to sign in modal, then Save to preview; name and signature or an exception remain required.",
+            interaction: "Enter name, tap Receiver Signature to open modal, or select exception remark checkboxes.",
+            sysResponse: "Validates fields. Disables signature preview when 'Customer declined' or 'Unavailable' is selected without erasing a saved signature.",
+            states: "Active, Validated, Signature Disabled (existing overlay active).",
             validation: "Requires Receiver Name AND (Signature OR Exception Remark).",
             rules: "Complete Delivery button enables only when all validation rules are met.",
             navFlow: "Step 4 -> 'Complete Delivery' -> Drop-off Success View",
@@ -3678,6 +3777,48 @@
               {label: "Checkbox Accent", value: "#4f46e5"},
               {label: "Disabled Overlay", value: "#f1f5f9"}
             ]
+          },
+          "Step 4: Receiver Signature": {
+            type: "Clickable Signature Preview",
+            description: "Receiver Signature * is a read-only preview in the existing dashed border box. The page cannot be drawn on directly. Saved signature is displayed in the box.",
+            behavior: "Enabled by default. Click/tap or press Enter/Space to open Signature Modal. Save replaces the preview; Close (X) leaves it unchanged. The existing Clear link clears the saved preview. Disable the box when either signature exception is checked; restore the saved preview when unchecked.",
+            interaction: "Click/tap to open modal; no page-level drawing. Disabled means non-clickable and modal cannot open.",
+            sysResponse: "Displays saved signature. Validation requires one when no exception is selected; the two no-signature reasons are mutually exclusive.",
+            states: "Empty, Saved, Disabled (Customer declined to sign OR Customer was not available to sign).",
+            validation: "Signature required if neither exception reason is selected. Either exception allows delivery without a signature, while receiver name and other remark validation stay intact.",
+            rules: "Close (X) must not overwrite an existing saved signature; selecting an exception must not delete it. Re-enable restores the preview.",
+            navFlow: "Step 4 Receiver Signature -> Signature Modal -> Save -> Step 4 Preview",
+            qaNotes: "Verify mouse/touch, Save, Close (X), Clear, re-sign, disabled click protection, preserved signature on exception toggling, and Step 4 validation.",
+            design: { spacing: "w-full h-32; existing label, alignment and margins retained", rounded: "rounded-lg border-2 border-dashed", typography: "Label text-[10px] font-bold uppercase; placeholder text-xs text-slate-400" },
+            colors: [{label: "Background", value: "#ffffff"}, {label: "Border", value: "#cbd5e1"}, {label: "Placeholder", value: "#94a3b8"}, {label: "Disabled Overlay", value: "#f1f5f9"}, {label: "Disabled Text", value: "#475569"}]
+          },
+          "Signature Modal": {
+            type: "Landscape Signature Capture Modal",
+            description: "Clockwise 90° rotated landscape signing panel entirely inside the portrait mobile app; the app itself stays upright. No title or instruction. X at the panel's upper right; Clear and Save adjacent at the lower right.",
+            behavior: "Opens from the Step 4 preview only when enabled. Drawing supports pointer/mouse/touch. Clear resets the modal draft; Close (X) discards unsaved changes and preserves the last saved signature; Save commits the draft to the preview. Reopening restores the previously saved signature for editing.",
+            interaction: "Draw on the landscape canvas; Clear, Close (X), or Save.",
+            sysResponse: "Save becomes available when the draft contains ink; saved image is displayed in the Step 4 preview and signature validation updates.",
+            states: "Hidden, Open Empty, Open Signed, Save Disabled, Save Enabled.",
+            validation: "Cannot save empty signature; no saved data changes on Close (X) or modal Clear alone.",
+            rules: "Receiver Signature box is non-clickable if Customer declined to sign or Customer was not available to sign; no modal opens in the disabled state.",
+            navFlow: "Click Receiver Signature -> Open landscape modal -> Draw -> Save -> Close -> Preview",
+            qaNotes: "Verify the panel and controls stay inside .mobile-container at different sizes; the background Step 4 remains behind the overlay. Verify rotated pointer coordinates with mouse/touch, aspect-correct saved preview, Clear, Close (X), Save, editing, and disabled state.",
+            design: { spacing: "#modal-signature absolute inset-0 within .mobile-container (container-type:size); centered child absolute left-1/2 top-1/2 rotated 90deg; unrotated width calc(100cqh - 64px) and height calc(100cqw - 56px), leaving 32px top/bottom and 28px left/right after rotation; panel p-3 gap-2 flex-col overflow-hidden; canvas #sig-canvas w-full flex-1 min-h-0 with pixel drawing buffer matched to canvas clientWidth/clientHeight at open, 90deg rotation inherited from parent; X header justify-end and p-1.5; actions justify-end gap-2 with Clear directly beside Save", rounded: "Panel rounded-3xl; canvas rounded-lg border-2 dashed; Save rounded-xl; Close rounded-lg", typography: "Clear/Save text-xs font-bold; Close icon text-lg; no title or description" },
+            colors: [{label: "Modal Background", value: "#ffffff"}, {label: "Canvas Background", value: "#ffffff"}, {label: "Canvas Border", value: "#cbd5e1"}, {label: "Clear Text", value: "#4f46e5"}, {label: "Close Icon", value: "#475569"}, {label: "Save Background", value: "#f29900"}]
+          },
+          "Signature Modal Close (X) Icon": {
+            type: "Icon Button / Dismiss Action",
+            description: "Compact upper-right icon on the rotated landscape panel for closing without saving; target is #btn-modal-sig-close.",
+            behavior: "Uses the existing modal dismissal handler without saving or clearing saved signature. Unsaved canvas edits are discarded when the modal reopens.",
+            interaction: "Tap / Click X",
+            sysResponse: "Closes the signature modal; previous signature preview and Step 4 validation remain unchanged.",
+            states: "Visible when Signature Modal is open; enabled.",
+            validation: "No submission or change to signature state.",
+            rules: "Only non-saving dismissal control; existing close behavior reused.",
+            navFlow: "Signature Modal -> Step 4 signature preview",
+            qaNotes: "Verify unsaved draft is discarded and previously saved signature remains intact.",
+            design: { spacing: "Upper-right of clockwise-rotated landscape panel; header justify-end shrink-0; p-1.5 with gap-2 before canvas", rounded: "rounded-lg", typography: "Font Awesome fa-xmark text-lg" },
+            colors: [{label: "Icon", value: "#475569"}, {label: "Hover Background", value: "#f1f5f9"}]
           },
           "Complete Delivery": {
             type: "Primary Action Button",
@@ -4518,7 +4659,7 @@
       }
 
       if (screenName === 'Add ePOD (Steps 1-4)') {
-        if (componentName.startsWith('Step 4') || componentName === 'Complete Delivery') {
+        if (componentName.startsWith('Step 4') || componentName === 'Complete Delivery' || (componentName === 'Signature Modal' || componentName === 'Signature Modal Close (X) Icon')) {
           goToEpodStep4();
         } else {
           goToEpodStep1to3();
@@ -4548,6 +4689,8 @@
         if (componentName.includes('Signature Disabled Overlay')) {
           document.getElementById('sig-disabled-overlay')?.classList.remove('hidden');
         }
+        if (componentName === 'Signature Modal' || componentName === 'Signature Modal Close (X) Icon') openSignatureModal();
+        else if (!document.getElementById('modal-signature').classList.contains('hidden')) cancelSignatureModal();
         if (componentName.includes('Remarks Other') || componentName.includes('Step 4')) {
           document.getElementById('remark-other-container')?.classList.remove('hidden');
           const otherCb = document.getElementById('remark-other');
