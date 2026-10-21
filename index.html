@@ -728,18 +728,18 @@
       </div>
     </div>
 
-    <!-- MODAL: RECEIVER SIGNATURE (Step 4 only) — rotated within the portrait mobile app -->
+    <!-- MODAL: RECEIVER SIGNATURE (Step 4 only) -->
     <div id="modal-signature" class="hidden absolute inset-0 z-50 bg-slate-950/85 backdrop-blur-sm overflow-hidden" style="container-type:size;">
-      <div class="absolute left-1/2 top-1/2 bg-white rounded-3xl p-3 shadow-2xl flex flex-col gap-2 overflow-hidden" style="position:absolute!important;width:calc(100cqh - 64px);height:calc(100cqw - 56px);transform:translate(-50%,-50%) rotate(90deg);">
-        <div class="flex justify-end shrink-0">
-          <button type="button" id="btn-modal-sig-close" onclick="cancelSignatureModal()" aria-label="Close signature without saving" title="Close" class="text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-lg p-1.5 transition flex items-center justify-center">
-            <i class="fa-solid fa-xmark text-lg"></i>
-          </button>
+      <div class="absolute left-1/2 top-1/2 bg-white rounded-3xl p-3 shadow-2xl flex flex-col overflow-hidden" style="position:absolute!important;width:calc(100% - 44px);height:calc(100% - 72px);max-width:352px;transform:translate(-50%,-50%);">
+        <button type="button" id="btn-modal-sig-close" onclick="cancelSignatureModal()" aria-label="Close signature without saving" title="Close" class="absolute top-2 right-2 z-10 w-8 h-8 rounded-lg text-slate-600 hover:text-slate-800 hover:bg-slate-100 transition flex items-center justify-center">
+          <i class="fa-solid fa-xmark text-base"></i>
+        </button>
+        <div class="flex-1 min-h-0 pt-11 pb-2">
+          <canvas id="sig-canvas" width="700" height="160" class="w-full h-full border-2 border-dashed border-slate-300 rounded-[22px] bg-white touch-none cursor-crosshair" aria-label="Signature drawing area"></canvas>
         </div>
-        <canvas id="sig-canvas" width="700" height="160" class="w-full flex-1 min-h-0 border-2 border-dashed border-slate-300 rounded-lg bg-white touch-none cursor-crosshair" aria-label="Signature drawing area"></canvas>
-        <div class="flex justify-end items-center gap-2 shrink-0">
-          <button type="button" id="btn-modal-sig-clear" onclick="clearModalSignature()" class="text-xs font-bold text-indigo-600 hover:text-indigo-800 px-2 py-2">Clear</button>
-          <button type="button" id="btn-modal-sig-save" onclick="saveSignatureModal()" disabled class="bg-[#f29900] hover:bg-[#e68a00] text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition disabled:opacity-40 disabled:cursor-not-allowed">Save</button>
+        <div class="flex items-center gap-3 pt-0.5">
+          <button type="button" id="btn-modal-sig-clear" onclick="clearModalSignature()" class="flex-1 text-sm font-bold text-indigo-600 hover:text-indigo-800 px-4 py-3">Clear</button>
+          <button type="button" id="btn-modal-sig-save" onclick="saveSignatureModal()" disabled class="flex-1 bg-[#f29900] hover:bg-[#e68a00] text-white font-bold text-sm px-4 py-3 rounded-xl shadow transition disabled:opacity-40 disabled:cursor-not-allowed">Save</button>
         </div>
       </div>
     </div>
@@ -2160,10 +2160,9 @@
     function getCoords(e) {
       if (!canvas) return { x: 0, y: 0 };
       const rect = canvas.getBoundingClientRect();
-      // The canvas is rotated clockwise with its modal; map screen coordinates back to canvas space.
       return {
-        x: (e.clientY - rect.top) * canvas.width / rect.height,
-        y: (rect.right - e.clientX) * canvas.height / rect.width
+        x: (e.clientX - rect.left) * canvas.width / rect.width,
+        y: (e.clientY - rect.top) * canvas.height / rect.height
       };
     }
 
@@ -2262,7 +2261,7 @@
       state.epod.step4_sig = true;
       updateSignaturePreview();
       cancelSignatureModal();
-      validateStep4();
+      handleRemarksChange('signature');
     }
 
     function clearSignature() {
@@ -2270,7 +2269,7 @@
       savedSignature = null;
       state.epod.step4_sig = false;
       updateSignaturePreview();
-      validateStep4();
+      handleRemarksChange('signature');
     }
 
     function updateCharCount(el) {
@@ -2286,10 +2285,16 @@
 
       if (!declinedEl || !unavailableEl || !otherEl) return;
 
+      const hasSavedSignature = !!savedSignature;
+      if (hasSavedSignature) {
+        declinedEl.checked = false;
+        unavailableEl.checked = false;
+      }
+
       if (trigger === 'declined' && declinedEl.checked) unavailableEl.checked = false;
       else if (trigger === 'unavailable' && unavailableEl.checked) declinedEl.checked = false;
 
-      if (declinedEl.checked) {
+      if (declinedEl.checked || hasSavedSignature) {
         unavailableEl.disabled = true;
         unavailableEl.parentElement.classList.add('opacity-40', 'cursor-not-allowed');
       } else {
@@ -2297,7 +2302,7 @@
         unavailableEl.parentElement.classList.remove('opacity-40', 'cursor-not-allowed');
       }
       
-      if (unavailableEl.checked) {
+      if (unavailableEl.checked || hasSavedSignature) {
         declinedEl.disabled = true;
         declinedEl.parentElement.classList.add('opacity-40', 'cursor-not-allowed');
       } else {
@@ -3015,6 +3020,8 @@
       "Step 4: Header & Step Number": "#epod-step-4 > div:first-child",
       "Step 4: Receiver Full Name Input": "#receiver-name",
       "Step 4: Receiver Signature": "#sig-container",
+      "Customer declined to sign": "#remark-declined",
+      "Customer was not available to sign": "#remark-unavailable",
       "Signature Modal": "#modal-signature > div",
       "Signature Modal Close (X) Icon": "#btn-modal-sig-close",
       "Step 4: Clear Signature Button": "#btn-clear-signature",
@@ -3760,8 +3767,8 @@
             description: "Dedicated final page for receiver name, a clickable signature preview, and exception remarks. The receiver signs only in the modal; all other fields remain unchanged.",
             behavior: "Accessed after Step 3. Tap signature box to sign in modal, then Save to preview; name and signature or an exception remain required.",
             interaction: "Enter name, tap Receiver Signature to open modal, or select exception remark checkboxes.",
-            sysResponse: "Validates fields. Disables signature preview when 'Customer declined' or 'Unavailable' is selected without erasing a saved signature.",
-            states: "Active, Validated, Signature Disabled (existing overlay active).",
+            sysResponse: "Validates fields. When unsigned, either exception disables the signature preview; after Save, both exception options are disabled until the saved signature is cleared.",
+            states: "Active, Validated, Signature Disabled (existing overlay active), Exception Options Disabled (saved signature).",
             validation: "Requires Receiver Name AND (Signature OR Exception Remark).",
             rules: "Complete Delivery button enables only when all validation rules are met.",
             navFlow: "Step 4 -> 'Complete Delivery' -> Drop-off Success View",
@@ -3781,34 +3788,58 @@
           "Step 4: Receiver Signature": {
             type: "Clickable Signature Preview",
             description: "Receiver Signature * is a read-only preview in the existing dashed border box. The page cannot be drawn on directly. Saved signature is displayed in the box.",
-            behavior: "Enabled by default. Click/tap or press Enter/Space to open Signature Modal. Save replaces the preview; Close (X) leaves it unchanged. The existing Clear link clears the saved preview. Disable the box when either signature exception is checked; restore the saved preview when unchecked.",
+            behavior: "Enabled by default. Click/tap or press Enter/Space to open Signature Modal. Save replaces the preview and disables both no-signature exceptions; Close (X) leaves the saved image unchanged. Existing Step 4 Clear removes the saved signature and re-enables both exception controls. When unsigned, either exception disables the clickable preview.",
             interaction: "Click/tap to open modal; no page-level drawing. Disabled means non-clickable and modal cannot open.",
             sysResponse: "Displays saved signature. Validation requires one when no exception is selected; the two no-signature reasons are mutually exclusive.",
             states: "Empty, Saved, Disabled (Customer declined to sign OR Customer was not available to sign).",
             validation: "Signature required if neither exception reason is selected. Either exception allows delivery without a signature, while receiver name and other remark validation stay intact.",
-            rules: "Close (X) must not overwrite an existing saved signature; selecting an exception must not delete it. Re-enable restores the preview.",
+            rules: "Close (X) must not overwrite an existing saved signature. After Save, both signature-exception checkboxes are disabled until the saved signature is removed using the existing Step 4 Clear action.",
             navFlow: "Step 4 Receiver Signature -> Signature Modal -> Save -> Step 4 Preview",
-            qaNotes: "Verify mouse/touch, Save, Close (X), Clear, re-sign, disabled click protection, preserved signature on exception toggling, and Step 4 validation.",
+            qaNotes: "Verify mouse/touch, Save, Close (X), Clear, re-sign, both exceptions disabled when signed, enabled again after saved-signature Clear, and Step 4 validation.",
             design: { spacing: "w-full h-32; existing label, alignment and margins retained", rounded: "rounded-lg border-2 border-dashed", typography: "Label text-[10px] font-bold uppercase; placeholder text-xs text-slate-400" },
             colors: [{label: "Background", value: "#ffffff"}, {label: "Border", value: "#cbd5e1"}, {label: "Placeholder", value: "#94a3b8"}, {label: "Disabled Overlay", value: "#f1f5f9"}, {label: "Disabled Text", value: "#475569"}]
           },
+          "Customer declined to sign": {
+            type: "Exception Checkbox / Read-only when signed",
+            description: "Existing declined-to-sign option; defaults enabled, and becomes disabled while a saved Receiver Signature exists.",
+            behavior: "Remains mutually exclusive with Customer was not available to sign when no signature is saved. Saving a signature disables both options; existing Step 4 Clear Signature re-enables them.",
+            interaction: "Click / Tap only when enabled", sysResponse: "Disabled checkboxes do not change exception or validation state.",
+            states: "Enabled when unsigned; Disabled (opacity-40 cursor-not-allowed) after Save; enabled again after clearing saved signature.",
+            validation: "Cannot be selected while a saved signature exists; other Step 4 validation unchanged.",
+            rules: "Uses existing disabled input and label styling; does not remove or reset the saved signature.",
+            navFlow: "Step 4 Remarks", qaNotes: "Check enabled before signing, disabled after Save, re-enabled by existing Clear.",
+            design: { spacing: "Existing checkbox w-4 h-4 in space-y-2.5 group", rounded: "rounded", typography: "text-[11px] font-medium" },
+            colors: [{label: "Text", value: "#334155"}, {label: "Checkbox Accent", value: "#4f46e5"}]
+          },
+          "Customer was not available to sign": {
+            type: "Exception Checkbox / Read-only when signed",
+            description: "Existing unavailable-to-sign option; defaults enabled, and becomes disabled while a saved Receiver Signature exists.",
+            behavior: "Remains mutually exclusive with Customer declined to sign when no signature is saved. Saving a signature disables both options; existing Step 4 Clear Signature re-enables them.",
+            interaction: "Click / Tap only when enabled", sysResponse: "Disabled checkboxes do not change exception or validation state.",
+            states: "Enabled when unsigned; Disabled (opacity-40 cursor-not-allowed) after Save; enabled again after clearing saved signature.",
+            validation: "Cannot be selected while a saved signature exists; other Step 4 validation unchanged.",
+            rules: "Uses existing disabled input and label styling; does not remove or reset the saved signature.",
+            navFlow: "Step 4 Remarks", qaNotes: "Check enabled before signing, disabled after Save, re-enabled by existing Clear.",
+            design: { spacing: "Existing checkbox w-4 h-4 in space-y-2.5 group", rounded: "rounded", typography: "text-[11px] font-medium" },
+            colors: [{label: "Text", value: "#334155"}, {label: "Checkbox Accent", value: "#4f46e5"}]
+          },
           "Signature Modal": {
-            type: "Landscape Signature Capture Modal",
-            description: "Clockwise 90° rotated landscape signing panel entirely inside the portrait mobile app; the app itself stays upright. No title or instruction. X at the panel's upper right; Clear and Save adjacent at the lower right.",
+            type: "Signature Capture Modal",
+            description: "Centered white signature card inside the mobile app viewport with a maximized signature area, a small plain X at the top right, and slightly larger Clear/Save buttons evenly sharing the bottom action row.",
             behavior: "Opens from the Step 4 preview only when enabled. Drawing supports pointer/mouse/touch. Clear resets the modal draft; Close (X) discards unsaved changes and preserves the last saved signature; Save commits the draft to the preview. Reopening restores the previously saved signature for editing.",
-            interaction: "Draw on the landscape canvas; Clear, Close (X), or Save.",
+            interaction: "Draw on the signature canvas; Clear, Close (X), or Save.",
             sysResponse: "Save becomes available when the draft contains ink; saved image is displayed in the Step 4 preview and signature validation updates.",
             states: "Hidden, Open Empty, Open Signed, Save Disabled, Save Enabled.",
             validation: "Cannot save empty signature; no saved data changes on Close (X) or modal Clear alone.",
             rules: "Receiver Signature box is non-clickable if Customer declined to sign or Customer was not available to sign; no modal opens in the disabled state.",
-            navFlow: "Click Receiver Signature -> Open landscape modal -> Draw -> Save -> Close -> Preview",
-            qaNotes: "Verify the panel and controls stay inside .mobile-container at different sizes; the background Step 4 remains behind the overlay. Verify rotated pointer coordinates with mouse/touch, aspect-correct saved preview, Clear, Close (X), Save, editing, and disabled state.",
-            design: { spacing: "#modal-signature absolute inset-0 within .mobile-container (container-type:size); centered child absolute left-1/2 top-1/2 rotated 90deg; unrotated width calc(100cqh - 64px) and height calc(100cqw - 56px), leaving 32px top/bottom and 28px left/right after rotation; panel p-3 gap-2 flex-col overflow-hidden; canvas #sig-canvas w-full flex-1 min-h-0 with pixel drawing buffer matched to canvas clientWidth/clientHeight at open, 90deg rotation inherited from parent; X header justify-end and p-1.5; actions justify-end gap-2 with Clear directly beside Save", rounded: "Panel rounded-3xl; canvas rounded-lg border-2 dashed; Save rounded-xl; Close rounded-lg", typography: "Clear/Save text-xs font-bold; Close icon text-lg; no title or description" },
-            colors: [{label: "Modal Background", value: "#ffffff"}, {label: "Canvas Background", value: "#ffffff"}, {label: "Canvas Border", value: "#cbd5e1"}, {label: "Clear Text", value: "#4f46e5"}, {label: "Close Icon", value: "#475569"}, {label: "Save Background", value: "#f29900"}]
+            navFlow: "Click Receiver Signature -> Open signature modal -> Draw -> Save -> Close -> Preview",
+            qaNotes: "Verify the card and controls stay inside .mobile-container at different sizes; the background Step 4 remains behind the overlay. Verify pointer coordinates with mouse/touch, saved preview, Clear, Close (X), Save, editing, and disabled state.",
+            design: { spacing: "#modal-signature absolute inset-0 within .mobile-container (container-type:size); centered child absolute left-1/2 top-1/2 width calc(100% - 44px), height calc(100% - 72px), max-width 352px, translate(-50%,-50%); panel p-3 with reduced internal spacing, pt-11 above the canvas and pb-2 below it to maximize signing area; bottom action row uses gap-3 and equal flex-1 button widths so Clear and Save fit side by side.", rounded: "Panel rounded-3xl; canvas rounded-[22px] border-2 dashed; Save rounded-xl; Close button rounded-lg with no filled background", typography: "Clear/Save text-sm font-bold; Close icon text-base; no title or description" },
+            colors: [{label: "Modal Background", value: "#ffffff"}, {label: "Canvas Background", value: "#ffffff"}, {label: "Canvas Border", value: "#cbd5e1"}, {label: "Clear Text", value: "#4f46e5"}, {label: "Close Icon", value: "#475569"}, {label: "Close Hover Background", value: "#f1f5f9"}, {label: "Save Background", value: "#f29900"}]
           },
           "Signature Modal Close (X) Icon": {
             type: "Icon Button / Dismiss Action",
-            description: "Compact upper-right icon on the rotated landscape panel for closing without saving; target is #btn-modal-sig-close.",
+            description: "Compact plain upper-right X icon on the signature modal for closing without saving; target is #btn-modal-sig-close.",
             behavior: "Uses the existing modal dismissal handler without saving or clearing saved signature. Unsaved canvas edits are discarded when the modal reopens.",
             interaction: "Tap / Click X",
             sysResponse: "Closes the signature modal; previous signature preview and Step 4 validation remain unchanged.",
@@ -3817,7 +3848,7 @@
             rules: "Only non-saving dismissal control; existing close behavior reused.",
             navFlow: "Signature Modal -> Step 4 signature preview",
             qaNotes: "Verify unsaved draft is discarded and previously saved signature remains intact.",
-            design: { spacing: "Upper-right of clockwise-rotated landscape panel; header justify-end shrink-0; p-1.5 with gap-2 before canvas", rounded: "rounded-lg", typography: "Font Awesome fa-xmark text-lg" },
+            design: { spacing: "Upper-right inside the modal; absolute top-2 right-2 z-10, w-8 h-8 centered clickable area; does not overlap the canvas", rounded: "rounded-lg", typography: "Font Awesome fa-xmark text-base" },
             colors: [{label: "Icon", value: "#475569"}, {label: "Hover Background", value: "#f1f5f9"}]
           },
           "Complete Delivery": {
