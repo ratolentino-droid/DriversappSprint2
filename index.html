@@ -735,10 +735,16 @@
           <i class="fa-solid fa-xmark text-base"></i>
         </button>
         <div class="flex-1 min-h-0 pt-11 pb-2">
-          <canvas id="sig-canvas" width="700" height="160" class="w-full h-full border-2 border-dashed border-slate-300 rounded-[22px] bg-white touch-none cursor-crosshair" aria-label="Signature drawing area"></canvas>
+          <div class="relative w-full h-full">
+            <canvas id="sig-canvas" width="700" height="160" class="w-full h-full border-2 border-dashed border-slate-300 rounded-[22px] bg-white touch-none cursor-crosshair" aria-label="Signature drawing area"></canvas>
+            <!-- Clockwise-rotated signing prompt is an overlay, never part of the saved canvas image. -->
+            <div id="sig-direction-guide" class="absolute inset-0 pointer-events-none select-none flex items-center justify-center" aria-hidden="true">
+              <span style="font-size:20px;line-height:1.2;white-space:nowrap;color:rgba(100,116,139,0.35);transform:rotate(90deg);">Sign here</span>
+            </div>
+          </div>
         </div>
         <div class="flex items-center gap-3 pt-0.5">
-          <button type="button" id="btn-modal-sig-clear" onclick="clearModalSignature()" class="flex-1 text-sm font-bold text-indigo-600 hover:text-indigo-800 px-4 py-3">Clear</button>
+          <button type="button" id="btn-modal-sig-clear" onclick="clearModalSignature()" class="flex-1 flex items-center justify-center text-sm font-bold text-indigo-600 hover:text-indigo-800 bg-slate-50 hover:bg-slate-100 border border-slate-300 rounded-xl px-4 py-3 transition">Clear</button>
           <button type="button" id="btn-modal-sig-save" onclick="saveSignatureModal()" disabled class="flex-1 bg-[#f29900] hover:bg-[#e68a00] text-white font-bold text-sm px-4 py-3 rounded-xl shadow transition disabled:opacity-40 disabled:cursor-not-allowed">Save</button>
         </div>
       </div>
@@ -2171,6 +2177,7 @@
       e.preventDefault();
       sigLoadToken++; // Ignore a previously queued image restore if the user starts a new stroke.
       isDrawing = true;
+      document.getElementById('sig-direction-guide').classList.add('hidden');
       if (canvas.setPointerCapture) canvas.setPointerCapture(e.pointerId);
       const pos = getCoords(e);
       ctx.beginPath();
@@ -2203,7 +2210,21 @@
       const preview = document.getElementById('sig-preview');
       const placeholder = document.getElementById('sig-placeholder');
       if (savedSignature) {
-        preview.src = savedSignature;
+        const signatureToPreview = savedSignature;
+        const image = new Image();
+        image.onload = () => {
+          if (savedSignature !== signatureToPreview) return;
+          // Rotate only the thumbnail 270° clockwise; preserve the stored signature for re-signing.
+          const thumbCanvas = document.createElement('canvas');
+          thumbCanvas.width = image.naturalHeight;
+          thumbCanvas.height = image.naturalWidth;
+          const thumbCtx = thumbCanvas.getContext('2d');
+          thumbCtx.translate(0, image.naturalWidth);
+          thumbCtx.rotate(-Math.PI / 2);
+          thumbCtx.drawImage(image, 0, 0);
+          preview.src = thumbCanvas.toDataURL('image/png');
+        };
+        image.src = signatureToPreview;
         preview.classList.remove('hidden');
         placeholder.classList.add('hidden');
       } else {
@@ -2229,6 +2250,7 @@
       }
       clearModalSignature();
       if (savedSignature) {
+        document.getElementById('sig-direction-guide').classList.add('hidden');
         const token = sigLoadToken;
         const image = new Image();
         image.onload = () => {
@@ -2245,6 +2267,7 @@
       sigLoadToken++;
       isDrawing = false;
       if (ctx && canvas) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      document.getElementById('sig-direction-guide').classList.remove('hidden');
       draftSignatureHasInk = false;
       document.getElementById('btn-modal-sig-save').disabled = true;
     }
@@ -3787,10 +3810,10 @@
           },
           "Step 4: Receiver Signature": {
             type: "Clickable Signature Preview",
-            description: "Receiver Signature * is a read-only preview in the existing dashed border box. The page cannot be drawn on directly. Saved signature is displayed in the box.",
+            description: "Receiver Signature * is a read-only preview in the existing dashed border box. The page cannot be drawn on directly. Saved signature is displayed in the box, with the thumbnail rotated 270° for preview only.",
             behavior: "Enabled by default. Click/tap or press Enter/Space to open Signature Modal. Save replaces the preview and disables both no-signature exceptions; Close (X) leaves the saved image unchanged. Existing Step 4 Clear removes the saved signature and re-enables both exception controls. When unsigned, either exception disables the clickable preview.",
             interaction: "Click/tap to open modal; no page-level drawing. Disabled means non-clickable and modal cannot open.",
-            sysResponse: "Displays saved signature. Validation requires one when no exception is selected; the two no-signature reasons are mutually exclusive.",
+            sysResponse: "Displays the saved signature thumbnail rotated 270° for preview only. Validation requires one when no exception is selected; the two no-signature reasons are mutually exclusive.",
             states: "Empty, Saved, Disabled (Customer declined to sign OR Customer was not available to sign).",
             validation: "Signature required if neither exception reason is selected. Either exception allows delivery without a signature, while receiver name and other remark validation stay intact.",
             rules: "Close (X) must not overwrite an existing saved signature. After Save, both signature-exception checkboxes are disabled until the saved signature is removed using the existing Step 4 Clear action.",
@@ -3825,7 +3848,7 @@
           },
           "Signature Modal": {
             type: "Signature Capture Modal",
-            description: "Centered white signature card inside the mobile app viewport with a maximized signature area, a small plain X at the top right, and slightly larger Clear/Save buttons evenly sharing the bottom action row.",
+            description: "Centered white signature card with a maximized signing area, a faint 'Sign here' text placeholder rotated 90° clockwise that disappears on drawing and reappears on Clear, a small X, and Clear/Save buttons.",
             behavior: "Opens from the Step 4 preview only when enabled. Drawing supports pointer/mouse/touch. Clear resets the modal draft; Close (X) discards unsaved changes and preserves the last saved signature; Save commits the draft to the preview. Reopening restores the previously saved signature for editing.",
             interaction: "Draw on the signature canvas; Clear, Close (X), or Save.",
             sysResponse: "Save becomes available when the draft contains ink; saved image is displayed in the Step 4 preview and signature validation updates.",
@@ -3833,9 +3856,9 @@
             validation: "Cannot save empty signature; no saved data changes on Close (X) or modal Clear alone.",
             rules: "Receiver Signature box is non-clickable if Customer declined to sign or Customer was not available to sign; no modal opens in the disabled state.",
             navFlow: "Click Receiver Signature -> Open signature modal -> Draw -> Save -> Close -> Preview",
-            qaNotes: "Verify the card and controls stay inside .mobile-container at different sizes; the background Step 4 remains behind the overlay. Verify pointer coordinates with mouse/touch, saved preview, Clear, Close (X), Save, editing, and disabled state.",
-            design: { spacing: "#modal-signature absolute inset-0 within .mobile-container (container-type:size); centered child absolute left-1/2 top-1/2 width calc(100% - 44px), height calc(100% - 72px), max-width 352px, translate(-50%,-50%); panel p-3 with reduced internal spacing, pt-11 above the canvas and pb-2 below it to maximize signing area; bottom action row uses gap-3 and equal flex-1 button widths so Clear and Save fit side by side.", rounded: "Panel rounded-3xl; canvas rounded-[22px] border-2 dashed; Save rounded-xl; Close button rounded-lg with no filled background", typography: "Clear/Save text-sm font-bold; Close icon text-base; no title or description" },
-            colors: [{label: "Modal Background", value: "#ffffff"}, {label: "Canvas Background", value: "#ffffff"}, {label: "Canvas Border", value: "#cbd5e1"}, {label: "Clear Text", value: "#4f46e5"}, {label: "Close Icon", value: "#475569"}, {label: "Close Hover Background", value: "#f1f5f9"}, {label: "Save Background", value: "#f29900"}]
+            qaNotes: "Verify the centered 90° clockwise 'Sign here' placeholder appears only on a blank canvas, does not intercept touch/mouse, hides on signing or saved-signature restore, and reappears on modal Clear. Verify the outlined light-gray Clear button and preserve saved preview, Close (X), Save, validation and disabled state.",
+            design: { spacing: "#modal-signature absolute inset-0 within .mobile-container (container-type:size); centered child absolute left-1/2 top-1/2 width calc(100% - 44px), height calc(100% - 72px), max-width 352px, translate(-50%,-50%); panel p-3 with reduced internal spacing, pt-11 above the canvas and pb-2 below it; 'Sign here' text centered over canvas and rotated 90° clockwise, pointer-events none; bottom action row uses gap-3 and equal flex-1 button widths so Clear and Save fit side by side.", rounded: "Panel rounded-3xl; canvas rounded-[22px] border-2 dashed; Clear rounded-xl outlined rectangle; Save rounded-xl; Close button rounded-lg with no filled background", typography: "Clear/Save text-sm font-bold; placeholder 20px regular; Close icon text-base; no title or description" },
+            colors: [{label: "Modal Background", value: "#ffffff"}, {label: "Canvas Background", value: "#ffffff"}, {label: "Canvas Border", value: "#cbd5e1"}, {label: "Clear Text", value: "#4f46e5"}, {label: "Clear Background", value: "#f8fafc"}, {label: "Clear Border", value: "#cbd5e1"}, {label: "Close Icon", value: "#475569"}, {label: "Close Hover Background", value: "#f1f5f9"}, {label: "Save Background", value: "#f29900"}]
           },
           "Signature Modal Close (X) Icon": {
             type: "Icon Button / Dismiss Action",
