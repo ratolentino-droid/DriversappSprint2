@@ -164,8 +164,8 @@
               </div>
               <span class="text-[10px] text-slate-500 font-medium">now</span>
             </div>
-            <div class="text-sm font-bold text-white leading-tight mt-1">New Trip Received</div>
-            <div class="text-xs text-slate-400 mt-1">Universal Robina Corporation – Trip Number E0-123</div>
+            <div id="persistent-notification-title" class="text-sm font-bold text-white leading-tight mt-1">New Trip Received</div>
+            <div id="persistent-notification-message" class="text-xs text-slate-400 mt-1">Universal Robina Corporation – Trip Number E0-123</div>
           </div>
         </div>
         <div class="h-8 w-full flex items-center justify-center cursor-grab touch-none shrink-0" id="shade-handle">
@@ -182,8 +182,8 @@
           </div>
           <span class="text-[9px] text-slate-400 font-medium">now</span>
         </div>
-        <div class="text-sm font-bold text-slate-800 leading-tight">New Trip Received</div>
-        <div class="text-[11px] text-slate-600 mt-0.5">Universal Robina Corporation – Trip Number E0-123</div>
+        <div id="push-notification-title" class="text-sm font-bold text-slate-800 leading-tight">New Trip Received</div>
+        <div id="push-notification-message" class="text-[11px] text-slate-600 mt-0.5">Universal Robina Corporation – Trip Number E0-123</div>
       </div>
 
       <div class="mt-20 mx-6 bg-white/10 backdrop-blur-md rounded-full px-4 py-3.5 flex items-center space-x-3 text-white shadow-lg border border-white/20">
@@ -1148,6 +1148,51 @@
     let randomDockInterval = null;
     let dockTimerInterval = null;
     let activeToastTripId = null;
+    let activeOsPushTripId = null;
+    let toastTimeout = null;
+    let osPushTimeout = null;
+    let statusTransitionSequence = 0;
+
+    function getTripStatusNotificationLabel(status) {
+      switch (status) {
+        case 'DISPATCHED':
+        case 'ASSIGNED': return 'Dispatched';
+        case 'ARRIVED_AT_PICKUP': return 'Arrived at Pick-Up';
+        case 'IN_TRANSIT': return 'In Transit';
+        case 'ARRIVED_AT_DROPOFF': return 'Arrived at Drop-off';
+        case 'COMPLETE':
+        case 'COMPLETED': return 'Completed';
+        case 'CANCELLED':
+        case 'CANCELED': return 'Cancelled';
+        default: return null;
+      }
+    }
+
+    function setTripStatus(trip, nextStatus) {
+      if (!trip || trip.status === nextStatus) return false;
+      trip.status = nextStatus;
+
+      const statusLabel = getTripStatusNotificationLabel(nextStatus);
+      if (!statusLabel) return true;
+
+      const notification = {
+        type: 'TRIP_STATUS_UPDATED',
+        transitionId: `${trip.id}-${++statusTransitionSequence}`,
+        tripId: trip.id,
+        tripNumber: trip.id,
+        clientName: trip.cargo,
+        status: statusLabel,
+        title: statusLabel,
+        body: `${trip.cargo} - ${trip.id}`
+      };
+
+      if (state.currentScreen === 'launcher') {
+        showSimulatedPushNotification(notification);
+      } else {
+        showToast(notification.title, notification.body, notification.tripId);
+      }
+      return true;
+    }
 
     function getStatusConfig(status) {
       switch (status) {
@@ -1217,7 +1262,7 @@
       updateSmsBadge();
 
       if (state.currentScreen !== 'launcher' && state.currentScreen !== 'sms-list' && state.currentScreen !== 'sms-thread') {
-        showToast(`${newTrip.cargo} – Trip Number ${newTrip.id}`, newTrip.id);
+        showToast('New Trip Received', `${newTrip.cargo} – Trip Number ${newTrip.id}`, newTrip.id);
       }
       
       addNotification("New Trip Received", `${newTrip.cargo} – Trip Number ${newTrip.id}`, "fa-solid fa-truck-fast text-blue-500");
@@ -1238,7 +1283,12 @@
       if (!trip || trip.type !== 'upcoming') return;
 
       trip.type = 'ongoing';
-      trip.status = 'DISPATCHED';
+      setTripStatus(trip, 'DISPATCHED');
+      setTimeout(() => {
+        if (trip.status !== 'DISPATCHED') return;
+        setTripStatus(trip, 'ARRIVED_AT_PICKUP');
+        refreshTripStatus(trip);
+      }, 2500);
 
       addNotification("Trip Executed", `Trip ${trip.id} executed via TMSuite Web dispatch.`, "fa-solid fa-play text-emerald-500");
       updateDashboardTripCounter();
@@ -1385,7 +1435,7 @@
         if (state.currentScreen !== 'epod' || state.activeTab !== 'ongoing') return;
         if (!document.getElementById('modal-dock').classList.contains('hidden')) return;
 
-        const eligibleTrips = state.trips.filter(t => t.type === 'ongoing' && !t.dockNumber && ['FOR_DISPATCH', 'DISPATCHED', 'ASSIGNED'].includes(t.status));
+        const eligibleTrips = state.trips.filter(t => t.type === 'ongoing' && !t.dockNumber && t.status === 'ARRIVED_AT_PICKUP');
         if (eligibleTrips.length > 0) {
           const randomTrip = eligibleTrips[Math.floor(Math.random() * eligibleTrips.length)];
           randomTrip.dockNumber = '0' + (Math.floor(Math.random() * 9) + 1);
@@ -1591,14 +1641,14 @@
       if (trip.status === 'LOADED') {
         setTimeout(() => {
           if (trip.status !== 'LOADED') return;
-          trip.status = 'IN_TRANSIT';
+          setTripStatus(trip, 'IN_TRANSIT');
           refreshTripStatus(trip);
           scheduleTripStatusTransition(trip);
         }, 2500);
       } else if (trip.status === 'IN_TRANSIT') {
         setTimeout(() => {
           if (trip.status !== 'IN_TRANSIT') return;
-          trip.status = 'ARRIVED_AT_DROPOFF';
+          setTripStatus(trip, 'ARRIVED_AT_DROPOFF');
           refreshTripStatus(trip);
         }, 2500);
       }
@@ -1613,7 +1663,7 @@
       // Start Loading remains gated by the existing dock-arrival check.
       if (step.next === 'LOADING' && trip.dockState !== 'ARRIVED') return;
 
-      trip.status = step.next;
+      setTripStatus(trip, step.next);
       if (step.next === 'LOADED') {
         trip.dockNumber = null;
         trip.dockState = null;
@@ -1636,7 +1686,7 @@
       const dropoff = trip?.dropoffs?.find(d => d.id === state.selectedDropoffId);
       if (dropoff && trip && trip.status === 'ARRIVED_AT_DROPOFF') {
         dropoff.status = 'UNLOADING';
-        trip.status = 'UNLOADING';
+        setTripStatus(trip, 'UNLOADING');
         refreshTripStatus(trip);
       }
     }
@@ -2406,14 +2456,14 @@
       const allCompleted = trip.dropoffs && trip.dropoffs.every(d => (d.status === 'COMPLETED'));
 
       if (allCompleted) {
-        trip.status = 'COMPLETE';
+        setTripStatus(trip, 'COMPLETE');
         trip.type = 'completed';
         const titleEl = document.getElementById('success-page-title');
         if(titleEl) titleEl.innerText = "Trip Completed!";
         const msgEl = document.getElementById('success-page-msg');
         if(msgEl) msgEl.innerText = "All drop-offs completed successfully.";
       } else {
-        trip.status = 'IN_TRANSIT'; // Keep the original multi-drop return to transit.
+        setTripStatus(trip, 'IN_TRANSIT'); // Keep the original multi-drop return to transit.
         scheduleTripStatusTransition(trip); // Auto-arrive at the next pending drop-off.
         const titleEl = document.getElementById('success-page-title');
         if(titleEl) titleEl.innerText = "Delivery Completed!";
@@ -2501,19 +2551,41 @@
       renderNotifications();
     }
 
-    function showToast(msg, tripId = null) {
+    function showToast(title, msg, tripId = null) {
       const toast = document.getElementById('toastNotification');
-      document.getElementById('toastTitle').innerText = 'New Trip Received';
+      document.getElementById('toastTitle').innerText = title;
       document.getElementById('toastMessage').innerText = msg;
       activeToastTripId = tripId;
 
       toast.classList.remove('opacity-0', 'pointer-events-none', '-translate-y-4');
       toast.classList.add('opacity-100', 'translate-y-0');
-      setTimeout(() => {
+      if (toastTimeout) clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
         toast.classList.remove('opacity-100', 'translate-y-0');
         toast.classList.add('opacity-0', 'pointer-events-none', '-translate-y-4');
         activeToastTripId = null;
+        toastTimeout = null;
       }, 4500);
+    }
+
+    function showSimulatedPushNotification(notification) {
+      const pushNotif = document.getElementById('os-push-notification');
+      if (!pushNotif) return;
+
+      document.getElementById('push-notification-title').innerText = notification.title;
+      document.getElementById('push-notification-message').innerText = notification.body;
+      document.getElementById('persistent-notification-title').innerText = notification.title;
+      document.getElementById('persistent-notification-message').innerText = notification.body;
+      activeOsPushTripId = notification.type === 'TRIP_STATUS_UPDATED' ? notification.tripId : null;
+
+      pushNotif.classList.remove('-translate-y-[150%]', 'opacity-0');
+      pushNotif.classList.add('translate-y-0', 'opacity-100');
+      if (osPushTimeout) clearTimeout(osPushTimeout);
+      osPushTimeout = setTimeout(() => {
+        pushNotif.classList.remove('translate-y-0', 'opacity-100');
+        pushNotif.classList.add('-translate-y-[150%]', 'opacity-0');
+        osPushTimeout = null;
+      }, 3500);
     }
 
     function handleToastClick() {
@@ -2597,9 +2669,6 @@
       const trip = state.trips.find(t => t.id === tripId);
       if (!trip) return;
       trip.dockState = 'ARRIVED';
-      if (trip.status === 'DISPATCHED' || trip.status === 'ASSIGNED') {
-        trip.status = 'ARRIVED_AT_PICKUP';
-      }
       refreshTripStatus(trip);
     }
 
@@ -2878,7 +2947,12 @@
     function launchAppFromPush() {
       const pushNotif = document.getElementById('os-push-notification');
       if (pushNotif) pushNotif.classList.add('-translate-y-[150%]', 'opacity-0');
+      const tripId = activeOsPushTripId;
+      activeOsPushTripId = null;
+      if (osPushTimeout) clearTimeout(osPushTimeout);
+      osPushTimeout = null;
       launchApp();
+      if (tripId) setTimeout(() => openTrip(tripId), 220);
     }
     function launchApp() {
       setTimeout(() => {
@@ -2910,16 +2984,12 @@
     setTimeout(() => {
       simulateNewTripAssigned(); 
       if (state.currentScreen === 'launcher') {
-        const pushNotif = document.getElementById('os-push-notification');
-        if (pushNotif) {
-          pushNotif.classList.remove('-translate-y-[150%]', 'opacity-0');
-          pushNotif.classList.add('translate-y-0', 'opacity-100');
-          setTimeout(() => {
-            if (pushNotif.classList.contains('translate-y-0')) {
-              pushNotif.classList.remove('translate-y-0', 'opacity-100');
-              pushNotif.classList.add('-translate-y-[150%]', 'opacity-0');
-            }
-          }, 3500);
+        const newTrip = state.trips.find(trip => trip.id === 'E0-123');
+        if (newTrip) {
+          showSimulatedPushNotification({
+            title: 'New Trip Received',
+            body: `${newTrip.cargo} – Trip Number ${newTrip.id}`
+          });
         }
       }
     }, 1500);
@@ -4767,11 +4837,11 @@
         const dropoff = trip?.dropoffs?.find(d => d.id === state.selectedDropoffId);
         if (trip && dropoff && screenName.includes('Ongoing')) {
           if (componentName === 'Add POD') {
-            trip.status = 'UNLOADING';
+            setTripStatus(trip, 'UNLOADING');
             dropoff.status = 'UNLOADING';
             renderSoWorkflowButton();
           } else if (componentName === 'Start Unloading') {
-            trip.status = 'ARRIVED_AT_DROPOFF';
+            setTripStatus(trip, 'ARRIVED_AT_DROPOFF');
             dropoff.status = 'PENDING';
             renderSoWorkflowButton();
           }
