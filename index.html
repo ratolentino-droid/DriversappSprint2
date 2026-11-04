@@ -1156,14 +1156,14 @@
     function getTripStatusNotificationLabel(status) {
       switch (status) {
         case 'DISPATCHED':
-        case 'ASSIGNED': return 'Dispatched';
-        case 'ARRIVED_AT_PICKUP': return 'Arrived at Pick-Up';
-        case 'IN_TRANSIT': return 'In Transit';
-        case 'ARRIVED_AT_DROPOFF': return 'Arrived at Drop-off';
+        case 'ASSIGNED': return 'Trip Dispatched';
+        case 'ARRIVED_AT_PICKUP': return "You've arrived at Pickup";
+        case 'IN_TRANSIT': return 'In Transit to Drop-off';
+        case 'ARRIVED_AT_DROPOFF': return "You've arrived at Pickup";
         case 'COMPLETE':
-        case 'COMPLETED': return 'Completed';
+        case 'COMPLETED': return 'Trip Completed';
         case 'CANCELLED':
-        case 'CANCELED': return 'Cancelled';
+        case 'CANCELED': return 'Trip Cancelled';
         default: return null;
       }
     }
