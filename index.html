@@ -1529,7 +1529,7 @@
       }, 3500); 
     }
 
-    function triggerDockAlert(tripId, isReminder = false) {
+    function triggerDockAlert(tripId, isReminder = false, isPreview = false) {
       state.activeDockAlertTripId = tripId;
       const trip = state.trips.find(t => t.id === tripId);
       if (!trip) return;
@@ -1544,12 +1544,12 @@
 
       const btnContainer = document.getElementById('dock-btn-container');
       btnContainer.innerHTML = `
-        <button id="btn-dock-ack" onclick="ackDockAlert('${trip.id}')" class="w-full bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm uppercase tracking-wide mt-2">
+        <button id="btn-dock-ack" onclick="ackDockAlert('${trip.id}')" class="w-full bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-black py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm uppercase tracking-wide mt-2">
           <i class="fa-solid fa-check-double"></i> <span>Acknowledge</span>
         </button>`;
 
       document.getElementById('modal-dock').classList.remove('hidden');
-      if (!isReminder) {
+      if (!isReminder && !isPreview) {
         addNotification("Dock Assignment", `Trip ${trip.id} – Dock ${trip.dockNumber}`, "fa-solid fa-warehouse text-amber-500");
         triggerDockSmsNotification(trip);
       }
@@ -2738,7 +2738,7 @@
       const btnContainer = document.getElementById('dock-btn-container');
       if (trip.dockState === 'PENDING' || trip.dockState === 'EXPIRED') {
         btnContainer.innerHTML = `
-          <button id="btn-dock-ack" onclick="ackDockAlert('${trip.id}')" class="w-full bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-black py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm uppercase tracking-wide mt-2">
+          <button id="btn-dock-ack" onclick="ackDockAlert('${trip.id}')" class="w-full bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-black py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm uppercase tracking-wide mt-2">
             <i class="fa-solid fa-check-double"></i> <span>Acknowledge</span>
           </button>`;
       } else {
@@ -3152,6 +3152,7 @@
       "Trip Information Card": "#detail-header-card",
       "Client Information Card": "#detail-header-card",
       "Trip Status Badge": "#detail-status",
+      "Dock Assigned Modal": "#modal-dock > div",
       "Route Sequence": "#detail-route-card",
       
       "Pick Up Location": ".uis-pickup-node",
@@ -3699,6 +3700,35 @@
             design: { spacing: "px-2 py-0.5", rounded: "rounded-full", typography: "text-[9px] font-black uppercase tracking-wider" },
             colors: [{label: "Badge Background", value: "Dynamic"}, {label: "Badge Text", value: "Dynamic"}]
           },
+          "Dock Assigned Modal": {
+            type: "Dock Assignment Alert Modal",
+            description: "Urgent dock assignment alert with an animated warehouse icon, assigned dock number, trip number, and Acknowledge action. The Dock Arrival Overdue reminder uses the same modal design.",
+            behavior: "Opens when a dock is assigned or an arrival reminder is raised. Acknowledging the assignment starts the dock countdown and closes the modal.",
+            interaction: "Tap / Click Acknowledge.",
+            sysResponse: "Marks the trip acknowledged, starts the applicable dock countdown, closes the modal, and refreshes the trip details.",
+            states: "Dock Assigned, Dock Arrival Overdue, Acknowledged (modal closed).",
+            validation: "Requires an active trip with an assigned dock number.",
+            rules: "Uses the existing dock-assignment modal layout and behavior. UIS preview opens without creating a notification or SMS.",
+            navFlow: "Trip Details -> Dock Assigned Modal -> Acknowledge -> Trip Details",
+            qaNotes: "Verify modal copy, dock and trip numbers, amber alert styling, and green Acknowledge button with readable white text.",
+            design: { spacing: "p-5 backdrop-blur-sm; card p-6 space-y-4; 12px top stripe; 80px icon; button py-3.5 mt-2", rounded: "rounded-3xl card; rounded-full icon; rounded-2xl dock panel; rounded-xl button", typography: "Inter; title text-xl font-black; Report To text-[10px] uppercase; dock number text-3xl font-black; trip number text-sm font-bold; button text-sm font-black uppercase tracking-wide" },
+            colors: [
+              {label: "Backdrop", value: "#020617"},
+              {label: "Modal Background", value: "#0f172a"},
+              {label: "Modal Border", value: "#f59e0b"},
+              {label: "Alert Stripe", value: "#f59e0b / #b45309"},
+              {label: "Icon Background", value: "#f59e0b33"},
+              {label: "Icon Border", value: "#fbbf24"},
+              {label: "Alert Accent", value: "#f59e0b"},
+              {label: "Dock Panel Background", value: "#f59e0b"},
+              {label: "Primary Text", value: "#ffffff"},
+              {label: "Dock Number Text", value: "#020617"},
+              {label: "Trip Number Text", value: "#78350f"},
+              {label: "Acknowledge Background", value: "#047857"},
+              {label: "Acknowledge Hover", value: "#065f46"},
+              {label: "Acknowledge Text", value: "#ffffff"}
+            ]
+          },
           "Route Sequence": {
             type: "Route Progress / Timeline Card Container",
             description: "Displays the ordered sequence of stops (Origin Pickup to Destination Drop-off) along with visual timeline progress connectors.",
@@ -4188,12 +4218,14 @@
       
       UIS_DATA["Trip Details (Upcoming)"] = JSON.parse(JSON.stringify(UIS_DATA["Trip Details"]));
       UIS_DATA["Trip Details (Upcoming)"].purpose = "Informational view of scheduled route sequence and client details for an undispatched or upcoming trip.";
+      delete UIS_DATA["Trip Details (Upcoming)"].components["Dock Assigned Modal"];
       if (UIS_DATA["Trip Details (Upcoming)"].components["Workflow Action Button"]) {
         delete UIS_DATA["Trip Details (Upcoming)"].components["Workflow Action Button"];
       }
       
       UIS_DATA["Trip Details (Completed)"] = JSON.parse(JSON.stringify(UIS_DATA["Trip Details"]));
       UIS_DATA["Trip Details (Completed)"].purpose = "Historical view of a successfully completed trip.";
+      delete UIS_DATA["Trip Details (Completed)"].components["Dock Assigned Modal"];
       if (UIS_DATA["Trip Details (Completed)"].components["Workflow Action Button"]) {
         delete UIS_DATA["Trip Details (Completed)"].components["Workflow Action Button"];
       }
@@ -4942,6 +4974,9 @@
         if (state.currentScreen !== 'trip-detail') {
           navigateTo('trip-detail');
           renderTripDetail();
+        }
+        if (componentName === 'Dock Assigned Modal') {
+          triggerDockAlert(state.selectedTripId, false, true);
         }
       }
 
