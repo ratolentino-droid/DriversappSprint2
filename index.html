@@ -993,6 +993,7 @@
           <span class="text-[10px] uppercase font-bold tracking-widest opacity-80">Report To</span>
           <span id="modal-dock-num" class="text-3xl font-black text-slate-950 mt-1">Dock ---</span>
           <span id="modal-dock-trip-id" class="text-sm font-bold text-amber-900 mt-1">Trip Number: ---</span>
+          <span id="modal-dock-timer" class="hidden mt-2 rounded-lg bg-amber-700/20 px-3 py-1 font-mono text-xl font-black text-amber-950">00:00</span>
         </div>
         <div id="dock-btn-container" class="w-full"></div>
       </div>
@@ -1147,11 +1148,167 @@
 
     let randomDockInterval = null;
     let dockTimerInterval = null;
+    const DOCK_STATE_STORAGE_KEY = 'tmex-dock-state-v2';
+    const DOCK_CYCLE_DURATION_MS = 5 * 60000;
+    const DOCK_REMINDER_DELAY_MS = 15 * 60000;
+    const DOCK_REMINDER_REPEAT_MS = 5 * 60000;
     let activeToastTripId = null;
     let activeOsPushTripId = null;
     let toastTimeout = null;
     let osPushTimeout = null;
     let statusTransitionSequence = 0;
+
+    function persistDockState(trip) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(DOCK_STATE_STORAGE_KEY) || '{}');
+        saved[trip.id] = {
+          dockNumber: trip.dockNumber,
+          dockState: trip.dockState,
+          dockExpiresAt: trip.dockExpiresAt,
+          dockCycleStartedAt: trip.dockCycleStartedAt,
+          dockReminderStartedAt: trip.dockReminderStartedAt,
+          dockNextReminderAt: trip.dockNextReminderAt,
+          dockSecondDueAt: trip.dockSecondDueAt,
+          dockSecondStatus: trip.dockSecondStatus,
+          dockSecondDisplayedAt: trip.dockSecondDisplayedAt,
+          acknowledged: trip.acknowledged
+        };
+        localStorage.setItem(DOCK_STATE_STORAGE_KEY, JSON.stringify(saved));
+      } catch (error) {
+        console.error('Failed to persist Dock Notification state:', error);
+      }
+    }
+
+    function hydrateDockState() {
+      try {
+        const saved = JSON.parse(localStorage.getItem(DOCK_STATE_STORAGE_KEY) || '{}');
+        state.trips.forEach(trip => {
+          if (!saved[trip.id]) return;
+          Object.assign(trip, saved[trip.id]);
+          if (
+            trip.dockState === 'COUNTDOWN_15' ||
+            trip.dockState === 'COUNTDOWN_SECOND_PENDING' ||
+            trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED' ||
+            trip.dockState === 'COUNTDOWN_SECOND_ACKNOWLEDGED' ||
+            trip.dockState === 'EXPIRED'
+          ) {
+            if (trip.dockExpiresAt) trip.dockCycleStartedAt = trip.dockExpiresAt;
+            if (!trip.dockReminderStartedAt) {
+              trip.dockReminderStartedAt = trip.dockExpiresAt || trip.dockSecondDueAt;
+            }
+            if (!trip.dockNextReminderAt) {
+              const reminderBase = trip.dockSecondDueAt || trip.dockExpiresAt;
+              if (reminderBase) {
+                trip.dockNextReminderAt = trip.dockState === 'COUNTDOWN_15'
+                  ? trip.dockExpiresAt
+                  : reminderBase + DOCK_REMINDER_REPEAT_MS;
+              }
+            }
+          }
+        });
+      } catch (error) {
+        console.error('Failed to restore Dock Notification state:', error);
+      }
+    }
+
+    function isDockAppActive() {
+      return !document.hidden &&
+        state.currentScreen !== 'launcher' &&
+        state.currentScreen !== 'sms-list' &&
+        state.currentScreen !== 'sms-thread';
+    }
+
+    function hasActiveDockTimer(trip) {
+      return !!trip &&
+        !!trip.dockCycleStartedAt &&
+        [
+          'COUNTDOWN_15',
+          'COUNTDOWN_SECOND_PENDING',
+          'COUNTDOWN_SECOND_DISPLAYED',
+          'COUNTDOWN_SECOND_ACKNOWLEDGED'
+        ].includes(trip.dockState);
+    }
+
+    function advanceDockReminderSchedule(trip, now) {
+      if (!trip.dockNextReminderAt || trip.dockNextReminderAt > now) return false;
+      const missedIntervals = Math.floor(
+        (now - trip.dockNextReminderAt) / DOCK_REMINDER_REPEAT_MS
+      ) + 1;
+      trip.dockNextReminderAt += missedIntervals * DOCK_REMINDER_REPEAT_MS;
+      return true;
+    }
+
+    function reconcileDockNotifications() {
+      const now = Date.now();
+      state.trips.forEach(trip => {
+        if (trip.dockState === 'EXPIRED') {
+          trip.dockState = 'COUNTDOWN_SECOND_PENDING';
+          trip.dockSecondDueAt = trip.dockSecondDueAt || trip.dockExpiresAt || now;
+          trip.dockReminderStartedAt = trip.dockReminderStartedAt ||
+            trip.dockExpiresAt || trip.dockSecondDueAt;
+          trip.dockNextReminderAt = trip.dockNextReminderAt ||
+            trip.dockSecondDueAt + DOCK_REMINDER_REPEAT_MS;
+          trip.dockSecondStatus = 'pending';
+          persistDockState(trip);
+        }
+
+        if (trip.dockState === 'COUNTDOWN_15' && trip.dockExpiresAt && now >= trip.dockExpiresAt) {
+          trip.dockState = 'COUNTDOWN_SECOND_PENDING';
+          trip.dockSecondDueAt = trip.dockExpiresAt;
+          trip.dockReminderStartedAt = trip.dockReminderStartedAt || trip.dockExpiresAt;
+          trip.dockNextReminderAt = trip.dockExpiresAt + DOCK_REMINDER_REPEAT_MS;
+          trip.dockSecondStatus = 'pending';
+          persistDockState(trip);
+        }
+
+        if (
+          trip.dockState === 'COUNTDOWN_SECOND_ACKNOWLEDGED' &&
+          trip.dockNextReminderAt &&
+          now >= trip.dockNextReminderAt
+        ) {
+          trip.dockState = 'COUNTDOWN_SECOND_PENDING';
+          trip.dockSecondDueAt = trip.dockNextReminderAt;
+          trip.dockReminderStartedAt = trip.dockReminderStartedAt ||
+            trip.dockExpiresAt || trip.dockSecondDueAt;
+          trip.dockSecondStatus = 'pending';
+          persistDockState(trip);
+        }
+
+        if (
+          trip.dockState === 'COUNTDOWN_SECOND_PENDING' ||
+          trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED'
+        ) {
+          if (advanceDockReminderSchedule(trip, now)) persistDockState(trip);
+        }
+
+        if (
+          trip.dockState === 'COUNTDOWN_SECOND_PENDING' &&
+          trip.dockSecondStatus !== 'completed' &&
+          trip.dockSecondStatus !== 'acknowledged' &&
+          trip.dockSecondDueAt &&
+          now >= trip.dockSecondDueAt &&
+          isDockAppActive()
+        ) {
+          trip.dockState = 'COUNTDOWN_SECOND_DISPLAYED';
+          trip.dockSecondStatus = 'displayed';
+          trip.dockSecondDisplayedAt = now;
+          persistDockState(trip);
+          triggerDockAlert(trip.id, true);
+        } else if (
+          trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED' &&
+          trip.dockSecondStatus === 'displayed' &&
+          isDockAppActive() &&
+          state.activeDockAlertTripId !== trip.id &&
+          document.getElementById('modal-dock').classList.contains('hidden')
+        ) {
+          triggerDockAlert(trip.id, true);
+        }
+      });
+
+      updateDockTimerUI();
+    }
+
+    hydrateDockState();
 
     function getTripStatusNotificationLabel(status) {
       switch (status) {
@@ -1542,6 +1699,13 @@
         titleEl.innerText = isReminder ? "DOCK ARRIVAL OVERDUE!" : "DOCK ASSIGNED!";
       }
 
+      const modalTimer = document.getElementById('modal-dock-timer');
+      if (modalTimer) {
+        const showTimer = trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED' &&
+          trip.dockSecondStatus === 'displayed';
+        modalTimer.classList.toggle('hidden', !showTimer);
+      }
+
       const btnContainer = document.getElementById('dock-btn-container');
       btnContainer.innerHTML = `
         <button id="btn-dock-ack" onclick="ackDockAlert('${trip.id}')" class="w-full bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-black py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm uppercase tracking-wide mt-2">
@@ -1549,6 +1713,7 @@
         </button>`;
 
       document.getElementById('modal-dock').classList.remove('hidden');
+      updateDockTimerUI();
       if (!isReminder && !isPreview) {
         addNotification("Dock Assigned", `Trip ${trip.id} – Dock ${trip.dockNumber}`, "fa-solid fa-warehouse text-amber-500");
         triggerDockSmsNotification(trip);
@@ -1559,18 +1724,41 @@
       const trip = state.trips.find(t => t.id === tripId);
       if (!trip) return;
 
-      if (trip.dockState === 'EXPIRED') {
-        trip.dockState = 'COUNTDOWN_5';
-        trip.dockExpiresAt = Date.now() + 5 * 60000;
+      if (
+        trip.dockState === 'COUNTDOWN_SECOND_PENDING' ||
+        trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED' ||
+        trip.dockState === 'EXPIRED'
+      ) {
+        const currentReminderDueAt = trip.dockSecondDueAt || trip.dockExpiresAt || Date.now();
+        trip.dockNextReminderAt = trip.dockNextReminderAt ||
+          currentReminderDueAt + DOCK_REMINDER_REPEAT_MS;
+        advanceDockReminderSchedule(trip, Date.now());
+        trip.dockState = 'COUNTDOWN_SECOND_ACKNOWLEDGED';
+        trip.dockSecondStatus = 'acknowledged';
+        trip.dockSecondDueAt = null;
+        trip.dockReminderStartedAt = trip.dockReminderStartedAt ||
+          trip.dockExpiresAt || currentReminderDueAt;
+        trip.dockCycleStartedAt = trip.dockCycleStartedAt || trip.dockExpiresAt ||
+          currentReminderDueAt - DOCK_REMINDER_DELAY_MS;
+        trip.dockSecondDisplayedAt = trip.dockSecondDisplayedAt || Date.now();
       } else {
         trip.dockState = 'COUNTDOWN_15';
-        trip.dockExpiresAt = Date.now() + 15 * 60000;
+        trip.dockExpiresAt = Date.now() + DOCK_REMINDER_DELAY_MS;
+        trip.dockCycleStartedAt = trip.dockExpiresAt;
+        trip.dockReminderStartedAt = null;
+        trip.dockSecondDueAt = trip.dockExpiresAt;
+        trip.dockNextReminderAt = trip.dockExpiresAt;
+        trip.dockSecondStatus = 'pending';
       }
       
       trip.acknowledged = true;
+      persistDockState(trip);
       document.getElementById('modal-dock').classList.add('hidden');
       state.activeDockAlertTripId = null;
+      const modalTimer = document.getElementById('modal-dock-timer');
+      if (modalTimer) modalTimer.classList.add('hidden');
       renderTripsList();
+      reconcileDockNotifications();
       
       if (state.currentScreen === 'trip-detail' && state.selectedTripId === tripId) {
         renderTripDetail();
@@ -1606,11 +1794,19 @@
               <span class="flex items-center text-sm font-bold"><i class="fa-solid fa-warehouse mr-1.5"></i> Dock ${trip.dockNumber}</span>
             </div>`;
           dockBadge.onclick = null;
-        } else if (trip.dockState === 'COUNTDOWN_15' || trip.dockState === 'COUNTDOWN_5') {
+        } else if (
+          trip.dockState === 'COUNTDOWN_15' ||
+          trip.dockState === 'COUNTDOWN_SECOND_PENDING' ||
+          trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED' ||
+          trip.dockState === 'COUNTDOWN_SECOND_ACKNOWLEDGED'
+        ) {
           dockBadge.className = "mt-2 bg-amber-500 text-white font-bold text-xs px-3 py-2 rounded-lg shadow flex items-center justify-between";
+          const timerSimulationAttrs = trip.dockState === 'COUNTDOWN_15'
+            ? `ondblclick="simulateDockCountdown('${trip.id}', event)" title="Double-click to simulate the final 5 seconds" class="cursor-help"`
+            : '';
           dockBadge.innerHTML = `
             <div class="flex flex-col space-y-0.5">
-              <span class="text-[10px] text-amber-900 font-black uppercase">Dock Reserved - <span id="dock-timer-text">--:--</span></span>
+              <span class="text-[10px] text-amber-900 font-black uppercase"><span id="dock-timer-label">Time Remaining</span> - <span id="dock-timer-text" ${timerSimulationAttrs}>--:--</span></span>
               <span class="flex items-center text-sm font-bold"><i class="fa-solid fa-warehouse mr-1.5"></i> Dock ${trip.dockNumber}</span>
             </div>
             <div>
@@ -1751,6 +1947,14 @@
       if (step.next === 'LOADED') {
         trip.dockNumber = null;
         trip.dockState = null;
+        trip.dockExpiresAt = null;
+        trip.dockCycleStartedAt = null;
+        trip.dockReminderStartedAt = null;
+        trip.dockNextReminderAt = null;
+        trip.dockSecondDueAt = null;
+        trip.dockSecondStatus = null;
+        trip.dockSecondDisplayedAt = null;
+        persistDockState(trip);
         scheduleTripStatusTransition(trip);
       }
       refreshTripStatus(trip);
@@ -2692,6 +2896,8 @@
       if (targetEl) targetEl.classList.add('active');
       state.currentScreen = screen;
 
+      reconcileDockNotifications();
+
       if (screen === 'dashboard') {
         updateDashboardTripCounter();
       } else if (screen === 'epod') {
@@ -2732,11 +2938,28 @@
       
       const titleEl = document.getElementById('modal-dock-title');
       if (titleEl) {
-        titleEl.innerText = trip.dockState === 'EXPIRED' ? 'DOCK ARRIVAL OVERDUE!' : 'DOCK ASSIGNED!';
+        titleEl.innerText =
+          trip.dockState === 'EXPIRED' ||
+          trip.dockState === 'COUNTDOWN_SECOND_PENDING' ||
+          trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED'
+            ? 'DOCK ARRIVAL OVERDUE!'
+            : 'DOCK ASSIGNED!';
       }
-      
+
+      const modalTimer = document.getElementById('modal-dock-timer');
+      if (modalTimer) {
+        const showTimer = trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED' &&
+          trip.dockSecondStatus === 'displayed';
+        modalTimer.classList.toggle('hidden', !showTimer);
+      }
+
       const btnContainer = document.getElementById('dock-btn-container');
-      if (trip.dockState === 'PENDING' || trip.dockState === 'EXPIRED') {
+      if (
+        trip.dockState === 'PENDING' ||
+        trip.dockState === 'EXPIRED' ||
+        trip.dockState === 'COUNTDOWN_SECOND_PENDING' ||
+        trip.dockState === 'COUNTDOWN_SECOND_DISPLAYED'
+      ) {
         btnContainer.innerHTML = `
           <button id="btn-dock-ack" onclick="ackDockAlert('${trip.id}')" class="w-full bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white font-black py-3.5 rounded-xl shadow-lg transition flex items-center justify-center space-x-2 text-sm uppercase tracking-wide mt-2">
             <i class="fa-solid fa-check-double"></i> <span>Acknowledge</span>
@@ -2745,7 +2968,9 @@
         btnContainer.innerHTML = `
           <button id="btn-dock-close" onclick="closeDockModal()" class="w-full border border-slate-600 text-slate-300 py-2 rounded-xl text-xs font-bold hover:bg-slate-800 mt-2 transition">Close</button>`;
       }
+      state.activeDockAlertTripId = trip.id;
       document.getElementById('modal-dock').classList.remove('hidden');
+      updateDockTimerUI();
     }
 
     function closeDockModal() {
@@ -2757,37 +2982,91 @@
       const trip = state.trips.find(t => t.id === tripId);
       if (!trip) return;
       trip.dockState = 'ARRIVED';
+      trip.dockExpiresAt = null;
+      trip.dockCycleStartedAt = null;
+      trip.dockReminderStartedAt = null;
+      trip.dockNextReminderAt = null;
+      trip.dockSecondDueAt = null;
+      trip.dockSecondStatus = 'completed';
+      persistDockState(trip);
+      if (state.activeDockAlertTripId === tripId) {
+        document.getElementById('modal-dock').classList.add('hidden');
+        state.activeDockAlertTripId = null;
+      }
       refreshTripStatus(trip);
+    }
+
+    function simulateDockCountdown(tripId, event) {
+      if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+      const trip = state.trips.find(t => t.id === tripId);
+      if (!trip || trip.dockState !== 'COUNTDOWN_15') return;
+
+      trip.dockExpiresAt = Date.now() + 5000;
+      trip.dockCycleStartedAt = trip.dockExpiresAt;
+      trip.dockReminderStartedAt = null;
+      trip.dockSecondDueAt = trip.dockExpiresAt;
+      trip.dockNextReminderAt = trip.dockExpiresAt;
+      persistDockState(trip);
+      updateDockTimerUI();
     }
 
     if (!dockTimerInterval) {
       dockTimerInterval = setInterval(() => {
-        let needsRender = false;
         const now = Date.now();
         state.trips.forEach(trip => {
-          if (trip.dockState === 'COUNTDOWN_15' || trip.dockState === 'COUNTDOWN_5') {
+          if (trip.dockState === 'COUNTDOWN_15' && trip.dockExpiresAt) {
             if (now >= trip.dockExpiresAt) {
-              trip.dockState = 'EXPIRED';
-              triggerDockAlert(trip.id, true);
-            }
-            if (state.currentScreen === 'trip-detail' && state.selectedTripId === trip.id) {
-              needsRender = true;
+              trip.dockState = 'COUNTDOWN_SECOND_PENDING';
+              trip.dockSecondDueAt = trip.dockExpiresAt;
+              trip.dockSecondStatus = 'pending';
+              persistDockState(trip);
             }
           }
         });
-        if (needsRender) updateDockTimerUI();
+        reconcileDockNotifications();
+        updateDockTimerUI();
       }, 1000);
     }
 
     function updateDockTimerUI() {
-      const trip = state.trips.find(t => t.id === state.selectedTripId);
-      if (!trip || (trip.dockState !== 'COUNTDOWN_15' && trip.dockState !== 'COUNTDOWN_5')) return;
-      const remainingMs = Math.max(0, trip.dockExpiresAt - Date.now());
-      const mins = Math.floor(remainingMs / 60000);
-      const secs = Math.floor((remainingMs % 60000) / 1000);
+      const detailTrip = state.trips.find(t => t.id === state.selectedTripId);
       const timerEl = document.getElementById('dock-timer-text');
-      if (timerEl) {
+      const timerLabelEl = document.getElementById('dock-timer-label');
+      if (timerEl && hasActiveDockTimer(detailTrip)) {
+        const now = Date.now();
+        let remainingSeconds;
+        if (detailTrip.dockState === 'COUNTDOWN_15' && now < detailTrip.dockExpiresAt) {
+          remainingSeconds = Math.max(0, Math.ceil((detailTrip.dockExpiresAt - now) / 1000));
+        } else {
+          const cycleElapsedSeconds = Math.max(
+            0,
+            Math.floor((now - detailTrip.dockCycleStartedAt) / 1000)
+          );
+          remainingSeconds = DOCK_CYCLE_DURATION_MS / 1000 -
+            (cycleElapsedSeconds % (DOCK_CYCLE_DURATION_MS / 1000));
+        }
+        const mins = Math.floor(remainingSeconds / 60);
+        const secs = remainingSeconds % 60;
         timerEl.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        if (timerLabelEl) timerLabelEl.innerText = 'Time Remaining';
+      }
+
+      const modalTrip = state.trips.find(t => t.id === state.activeDockAlertTripId);
+      const modalTimer = document.getElementById('modal-dock-timer');
+      if (
+        modalTimer &&
+        modalTrip &&
+        modalTrip.dockState === 'COUNTDOWN_SECOND_DISPLAYED' &&
+        modalTrip.dockSecondStatus === 'displayed' &&
+        modalTrip.dockReminderStartedAt
+      ) {
+        const elapsedSeconds = Math.max(0, Math.floor((Date.now() - modalTrip.dockReminderStartedAt) / 1000));
+        const mins = Math.floor(elapsedSeconds / 60);
+        const secs = elapsedSeconds % 60;
+        modalTimer.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
       }
     }
     
@@ -3049,6 +3328,7 @@
         dashboard.classList.add('active', 'animate-app-launch');
         state.currentScreen = 'dashboard';
         updateDashboardTripCounter();
+        reconcileDockNotifications();
         if (!state.demoNewTripAdded) setTimeout(simulateNewTripAssigned, 3500);
       }, 150);
     }
@@ -3065,6 +3345,8 @@
 
     updateDashboardTripCounter();
     initNotificationShade();
+    document.addEventListener('visibilitychange', reconcileDockNotifications);
+    reconcileDockNotifications();
     setInterval(() => {
       if (state.isDeviceRegistered && state.currentScreen === 'settings') renderLastSync();
     }, 15000);
@@ -3152,6 +3434,8 @@
       "Trip Information Card": "#detail-header-card",
       "Client Information Card": "#detail-header-card",
       "Trip Status Badge": "#detail-status",
+      "Dock Timer": "#dock-timer-text",
+      "Dock Reminder Timer": "#modal-dock-timer",
       "Dock Assigned Modal": "#modal-dock > div",
       "Route Sequence": "#detail-route-card",
       
@@ -3477,16 +3761,16 @@
           },
           "Dock Assigned Modal": {
             type: "Dock Assignment Alert Modal",
-            description: "Urgent dock assignment alert with an animated warehouse icon, assigned dock number, trip number, and Acknowledge action. The Dock Arrival Overdue reminder uses the same modal design.",
-            behavior: "Opens when a dock is assigned or an arrival reminder is raised. Acknowledging the assignment starts the dock countdown and closes the modal.",
+            description: "Urgent dock assignment alert with an animated warehouse icon, assigned dock number, trip number, and Acknowledge action. The overdue reminder uses the same modal design and includes the elapsed Dock Reminder Timer.",
+            behavior: "Opens when a dock is assigned, then repeats every five minutes after the initial 15-minute wait. The overdue reminder count-up stops when acknowledged; the Trip Details countdown continues until Arrived.",
             interaction: "Tap / Click Acknowledge.",
-            sysResponse: "Marks the trip acknowledged, starts the applicable dock countdown, closes the modal, and refreshes the trip details.",
-            states: "Dock Assigned, Dock Arrival Overdue, Acknowledged (modal closed).",
+            sysResponse: "On initial assignment, starts the 15-minute Trip Details countdown. Each overdue reminder acknowledgement closes that modal and schedules the next reminder cycle without stopping the Trip Details timer.",
+            states: "Dock Assigned, Dock Arrival Overdue (with elapsed time), Acknowledged (modal closed).",
             validation: "Requires an active trip with an assigned dock number.",
-            rules: "Uses the existing dock-assignment modal layout and behavior. UIS preview opens without creating a notification or SMS.",
+            rules: "Preserve the existing modal layout. The overdue timer starts at 00:00 at the first 15-minute deadline and continues cumulatively across five-minute reminders and acknowledgements until Arrived. Display positive elapsed time through app closure or backgrounding. UIS preview opens without creating a notification or SMS.",
             navFlow: "Trips - Ongoing -> Dock Assigned Modal -> Acknowledge -> Trips - Ongoing",
-            qaNotes: "Verify modal copy, dock and trip numbers, amber alert styling, and green Acknowledge button with readable white text.",
-            design: { spacing: "p-5 backdrop-blur-sm; card p-6 space-y-4; 12px top stripe; 80px icon; button py-3.5 mt-2", rounded: "rounded-3xl card; rounded-full icon; rounded-2xl dock panel; rounded-xl button", typography: "Inter; title text-xl font-black; Report To text-[10px] uppercase; dock number text-3xl font-black; trip number text-sm font-bold; button text-sm font-black uppercase tracking-wide" },
+            qaNotes: "Verify modal copy, dock and trip numbers, amber alert styling, elapsed time, repeat reminders every five minutes after acknowledgement, and green Acknowledge button with readable white text.",
+            design: { spacing: "p-5 backdrop-blur-sm; card p-6 space-y-4; 12px top stripe; 80px icon; button py-3.5 mt-2", rounded: "rounded-3xl card; rounded-full icon; rounded-2xl dock panel; rounded-xl button", typography: "Inter; title text-xl font-black; Report To text-[10px] uppercase; dock number text-3xl font-black; trip number text-sm font-bold; elapsed timer text-xl font-mono; button text-sm font-black uppercase tracking-wide" },
             colors: [
               {label: "Backdrop", value: "#020617"},
               {label: "Modal Background", value: "#0f172a"},
@@ -3499,6 +3783,7 @@
               {label: "Primary Text", value: "#ffffff"},
               {label: "Dock Number Text", value: "#020617"},
               {label: "Trip Number Text", value: "#78350f"},
+              {label: "Elapsed Timer", value: "#451a03"},
               {label: "Acknowledge Background", value: "#047857"},
               {label: "Acknowledge Hover", value: "#065f46"},
               {label: "Acknowledge Text", value: "#ffffff"}
@@ -3728,6 +4013,34 @@
             behavior: "Displays status text and background color matching the Trip Card.", interaction: "None.", sysResponse: "None.", states: "Dynamic based on status.", validation: "N/A", rules: "Aligned at the right edge of the responsive flex row using auto left margin and no shrinking; preserve badge typography, colors, padding, border radius, and shape.", navFlow: "N/A", qaNotes: "UIS highlights the actual Status badge; verify fixed right alignment in all Trip Details contexts.",
             design: { spacing: "px-2 py-0.5", rounded: "rounded-full", typography: "text-[9px] font-black uppercase tracking-wider" },
             colors: [{label: "Badge Background", value: "Dynamic"}, {label: "Badge Text", value: "Dynamic"}]
+          },
+          "Dock Timer": {
+            type: "Repeating Countdown Timer",
+            description: "Shows the repeating five-minute dock countdown in the existing dock badge location on Trip Details.",
+            behavior: "Counts down from 15:00 to the first overdue reminder, then switches to a repeating 05:00 countdown. Every five-minute cycle displays a Dock notification modal.",
+            interaction: "Double-click the countdown to simulate its final five seconds. Arrived ends the repeating countdown through its existing workflow.",
+            sysResponse: "Calculates the initial wait and repeating cycles from persisted timestamps, restoring the correct remaining value after backgrounding or reopening.",
+            states: "15-minute countdown, repeating five-minute countdown, Stopped / hidden (Arrived).",
+            validation: "Requires a dock assignment with an active dock timer.",
+            rules: "Begin the five-minute repeat cycle only after the initial 15-minute deadline. Arrived prevents further countdown cycles and pending reminders.",
+            navFlow: "Trip Details -> Dock Timer -> Arrived",
+            qaNotes: "Verify five-minute reset, timestamp accuracy after foregrounding/reopening, and timer removal after Arrived.",
+            design: { spacing: "Existing dock badge timer position", rounded: "Existing badge styling", typography: "Existing badge timer typography" },
+            colors: [{label: "Text", value: "Existing amber dock badge"}]
+          },
+          "Dock Reminder Timer": {
+            type: "Elapsed Timer",
+            description: "Displays overdue time in the existing Dock Arrival Overdue modal.",
+            behavior: "Counts upward from 00:00 at the first overdue deadline and continues across five-minute reminder intervals, including after Acknowledge, until the driver confirms Arrived.",
+            interaction: "Read-only; the existing Acknowledge action stops this timer.",
+            sysResponse: "Calculates elapsed time from the deadline timestamp, including time spent with the app backgrounded or closed.",
+            states: "Hidden before the reminder; elapsed MM:SS while the reminder is unacknowledged.",
+            validation: "Requires a due, unacknowledged dock reminder.",
+            rules: "Display positive cumulative elapsed time (for example 15:00 after three five-minute intervals). Acknowledging closes the current modal but does not stop or reset this timer. Arrived stops the timer and all future reminders.",
+            navFlow: "Dock Arrival Overdue -> Acknowledge",
+            qaNotes: "Verify cumulative overdue display after app reopen and after acknowledgement; confirm only Arrived stops the counter and future reminders.",
+            design: { spacing: "Inside existing amber dock panel", rounded: "rounded-lg", typography: "text-xl font-mono font-black" },
+            colors: [{label: "Text", value: "#451a03"}]
           },
           "Route Sequence": {
             type: "Route Progress / Timeline Card Container",
