@@ -425,7 +425,7 @@
     <div id="view-notifications" class="view-section bg-slate-100 overflow-hidden relative">
       <header class="bg-[#FFCC00] text-slate-900 p-4 shadow-sm shrink-0 flex items-center justify-between z-10 pt-10 pb-4">
         <div class="flex items-center space-x-3">
-          <button id="btn-notif-back" onclick="navigateTo(state.currentScreen === 'notifications' ? 'dashboard' : 'epod')" class="text-slate-900 hover:bg-black/10 p-1.5 rounded-lg transition text-xl">
+          <button id="btn-notif-back" onclick="navigateTo('epod')" class="text-slate-900 hover:bg-black/10 p-1.5 rounded-lg transition text-xl">
             <i class="fa-solid fa-arrow-left"></i>
           </button>
           <h1 class="font-bold text-lg tracking-wide text-slate-900">Notifications</h1>
@@ -875,8 +875,8 @@
         </div>
 
         <div class="flex items-center justify-between text-xs text-slate-400 px-1">
-          <span id="pod-images-counter" class="font-bold text-white text-[11px]">0/4 Images Captured</span>
-          <span class="text-[10px] text-slate-500">Min: 1 photo</span>
+          <span id="pod-images-counter" class="font-bold text-white text-[11px]">0/4 Photos Captured</span>
+          <span id="pod-images-requirement" class="text-[10px] text-slate-500">Min: 1 photo</span>
         </div>
 
         <div class="w-full">
@@ -1043,6 +1043,12 @@
           <option value="All (Unfiltered)">All (Unfiltered)</option>
           <option value="RTM-075-01">RTM-075-01 (Menu: Trip Navigation)</option>
           <option value="RTM-075-02">RTM-075-02 (Menu: Count Badge)</option>
+          <option value="RTM-106">RTM-106 (Drop-Off Completion Notifications)</option>
+          <option value="RTM-078-09">RTM-078-09 (Notification Back Navigation)</option>
+          <option value="RTM-087-13">RTM-087-13 (SO-Based Receipt Photo Count)</option>
+          <option value="RTM-087-14">RTM-087-14 (Receipt Camera Photo Capture)</option>
+          <option value="RTM-087-15">RTM-087-15 (Receipt Photo Retake)</option>
+          <option value="RTM-087-16">RTM-087-16 (Receipt Photo Confirmation)</option>
         </select>
       </div>
 
@@ -1347,6 +1353,7 @@
         "You've Arrived at Pick-up": 'arrived-at-pickup',
         'In Transit': 'in-transit',
         "You've Arrived at Drop-off": 'arrived-at-dropoff',
+        'Drop-Off Completed': 'drop-off-completed',
         'Trip Completed': 'trip-completed',
         'Trip Cancelled': 'trip-cancelled',
         'Dock Assigned': 'dock-assigned',
@@ -1365,10 +1372,12 @@
         "You've Arrived at Pick-up",
         'In Transit',
         "You've Arrived at Drop-off",
+        'Drop-Off Completed',
         'Trip Completed',
         'Trip Cancelled'
       ];
       const isTripEvent = tripEventTitles.includes(title);
+      const previewDropoff = trip.dropoffs?.[0];
       const statusForTitle = {
         'Trip Dispatched': 'DISPATCHED',
         "You've Arrived at Pick-up": 'ARRIVED_AT_PICKUP',
@@ -1379,16 +1388,20 @@
       }[title];
       const message = isTripEvent
         ? title === 'Trip Completed'
-          ? `ePOD successfully submitted - Trip Number ${trip.id}`
-          : `${trip.cargo} – Trip Number ${trip.id}`
+          ? `ePOD successfully submitted - ${trip.id}`
+          : title === 'Drop-Off Completed'
+            ? `ePOD successfully submitted - ${trip.id} - ${previewDropoff?.title || 'SM Megamall'}`
+            : `${trip.cargo} – Trip Number ${trip.id}`
         : title === 'Dock Assigned' ? `Trip ${trip.id} – Dock ${trip.dockNumber || '03'}` : 'TMSuite synced successfully.';
       const icon = statusForTitle
         ? getTripStatusNotificationIcon(statusForTitle)
         : title === 'New Trip Received'
           ? 'fa-solid fa-box-open text-blue-500'
-          : title === 'Dock Assigned'
-            ? 'fa-solid fa-warehouse text-amber-500'
-            : 'fa-solid fa-gear text-slate-500';
+          : title === 'Drop-Off Completed'
+            ? 'fa-solid fa-circle-check text-emerald-600'
+            : title === 'Dock Assigned'
+              ? 'fa-solid fa-warehouse text-amber-500'
+              : 'fa-solid fa-gear text-slate-500';
 
       state.notifications.unshift({
         id: `uis-preview-${getNotificationTypeKey(title)}`,
@@ -1414,7 +1427,7 @@
         : '';
       const eventKey = `${trip.id}:${statusLabel}:${eventDropoff}`;
       const notificationBody = statusLabel === 'Trip Completed'
-        ? `ePOD successfully submitted - Trip Number ${trip.id}`
+        ? `ePOD successfully submitted - ${trip.id}`
         : `${trip.cargo} – Trip Number ${trip.id}`;
       const notification = {
         type: 'TRIP_STATUS_UPDATED',
@@ -1480,10 +1493,19 @@
         id: 'E0-123',
         type: 'upcoming',
         cargo: 'Universal Robina Corporation',
-        deliveriesCount: 1,
+        deliveriesCount: 3,
         pickup: { title: 'DC Universal Robina Corporation Calamba', address: 'DC Alpha Complex, Sector 4', time: 'June 4, 2026 11:15 AM' },
         dropoffs: [
-            { id: 'd5', title: 'Puregold - Parañaque', address: 'Dr A. Santos Ave, Parañaque, Metro Manila', time: 'June 4, 2026 04:30 PM', status: 'PENDING', sos: [{id: 'SO-482100', items: ['12x High-Value Electronics Pallets (450kg)', '4x Spare Components Crates (120kg)']}] }
+            { id: 'd5', title: 'SM Megamall', address: 'EDSA corner Ortigas Avenue, Mandaluyong City', time: 'June 4, 2026 04:30 PM', status: 'PENDING', sos: [
+              {id: 'SO-482100', items: ['12x High-Value Electronics Pallets (450kg)']},
+              {id: 'SO-482103', items: ['4x Spare Components Crates (120kg)']},
+              {id: 'SO-482104', items: ['6x Mobile Accessories Boxes (90kg)']}
+            ] },
+            { id: 'd6', title: 'SM North EDSA', address: 'North Avenue corner EDSA, Quezon City', time: 'June 4, 2026 05:30 PM', status: 'PENDING', sos: [
+              {id: 'SO-482101', items: ['8x Consumer Goods Pallets (320kg)']},
+              {id: 'SO-482105', items: ['3x Home Appliance Crates (160kg)']}
+            ] },
+            { id: 'd7', title: 'SM Mall of Asia', address: 'Seaside Boulevard, Pasay City', time: 'June 4, 2026 06:30 PM', status: 'PENDING', sos: [{id: 'SO-482102', items: ['6x Household Goods Pallets (240kg)']}] }
         ],
         status: 'FOR_DISPATCH',
         dockNumber: null,
@@ -2105,6 +2127,10 @@
     let isSigDisabled = false;
     let cameraMode = 'site'; // 'site' or 'receipt'
 
+    function getRequiredReceiptPhotoCount(dropoff) {
+      return Array.isArray(dropoff?.sos) ? dropoff.sos.length : 0;
+    }
+
     function initAddEpod() {
       ensureTripSelected();
       goToEpodStep1to3();
@@ -2113,6 +2139,10 @@
       if (trip && trip.dropoffs) {
           dropoff = trip.dropoffs.find(d => d.id === state.selectedDropoffId);
       }
+      const hasSavedReceiptConfirmation = !!dropoff?.signedReceiptPhotosConfirmed &&
+        Array.isArray(dropoff.signedReceiptPhotos) &&
+        dropoff.signedReceiptPhotos.length === getRequiredReceiptPhotoCount(dropoff);
+      const savedReceiptPhotos = hasSavedReceiptConfirmation ? [...dropoff.signedReceiptPhotos] : [];
       if (dropoff) {
         document.getElementById('epod-dropoff-title').innerText = dropoff.title;
         document.getElementById('epod-dropoff-addr').innerText = dropoff.address;
@@ -2135,6 +2165,11 @@
       handleRemarksChange('reset');
       
       resetStepUI(1); resetStepUI(2); resetStepUI(3); resetStepUI(4);
+      if (hasSavedReceiptConfirmation) {
+        state.epod.receiptPhotos = savedReceiptPhotos;
+        state.epod.step3 = true;
+        document.getElementById('badge-step-3').classList.remove('hidden');
+      }
       renderSitePhotos();
       renderReceiptPhotos();
       checkNextButtonState();
@@ -2298,6 +2333,10 @@
 
     function openPodCaptureModal(mode) {
       cameraMode = mode;
+      if (mode === 'receipt') {
+        renderReceiptPhotos();
+        checkNextButtonState();
+      }
       document.getElementById('modal-pod-capture').classList.remove('hidden');
       const titleEl = document.getElementById('pod-camera-title');
       if(titleEl) {
@@ -2322,7 +2361,7 @@
       const trip = state.trips.find(t => t.id === state.selectedTripId);
       const dropoff = trip?.dropoffs?.find(d => d.id === state.selectedDropoffId);
       
-      const maxImages = cameraMode === 'receipt' ? (dropoff?.sos?.length || 1) : 4;
+      const maxImages = cameraMode === 'receipt' ? getRequiredReceiptPhotoCount(dropoff) : 4;
       const targetArray = cameraMode === 'site' ? state.epod.sitePhotos : state.epod.receiptPhotos;
 
       if (targetArray.length >= maxImages) return;
@@ -2342,6 +2381,12 @@
       const newImg = samplePhotos[targetArray.length % samplePhotos.length];
       targetArray.push(newImg);
       activePreviewIndex = targetArray.length - 1;
+      if (cameraMode === 'receipt') {
+        state.epod.step3 = false;
+        document.getElementById('badge-step-3').classList.add('hidden');
+        renderReceiptPhotos();
+        checkNextButtonState();
+      }
       
       renderPodThumbnails();
       updatePodCaptureControls();
@@ -2359,9 +2404,16 @@
     function removePodPhoto(idx, event) {
       if (event) event.stopPropagation();
       const targetArray = cameraMode === 'site' ? state.epod.sitePhotos : state.epod.receiptPhotos;
+      if (!targetArray[idx]) return;
       targetArray.splice(idx, 1);
       if (activePreviewIndex >= targetArray.length) {
         activePreviewIndex = Math.max(0, targetArray.length - 1);
+      }
+      if (cameraMode === 'receipt') {
+        state.epod.step3 = false;
+        document.getElementById('badge-step-3').classList.add('hidden');
+        renderReceiptPhotos();
+        checkNextButtonState();
       }
       renderPodThumbnails();
       updatePodCaptureControls();
@@ -2370,11 +2422,14 @@
     function updatePodCaptureControls() {
       const trip = state.trips.find(t => t.id === state.selectedTripId);
       const dropoff = trip?.dropoffs?.find(d => d.id === state.selectedDropoffId);
-      const maxImages = cameraMode === 'receipt' ? (dropoff?.sos?.length || 1) : 4;
+      const maxImages = cameraMode === 'receipt' ? getRequiredReceiptPhotoCount(dropoff) : 4;
       const targetArray = cameraMode === 'site' ? state.epod.sitePhotos : state.epod.receiptPhotos;
       const count = targetArray.length;
       
-      document.getElementById('pod-images-counter').innerText = `${count}/${maxImages} Images Captured`;
+      document.getElementById('pod-images-counter').innerText = `${count}/${maxImages} Photos Captured`;
+      document.getElementById('pod-images-requirement').innerText = cameraMode === 'receipt'
+        ? `Required: ${maxImages} ${maxImages === 1 ? 'photo' : 'photos'}`
+        : 'Min: 1 photo';
 
       const shutterBtn = document.getElementById('btn-shutter-pod');
       if (count >= maxImages) {
@@ -2386,7 +2441,8 @@
       }
 
       const confirmBtn = document.getElementById('btn-pod-confirm');
-      if (count >= 1) {
+      const canConfirm = cameraMode === 'receipt' ? count === maxImages : count >= 1;
+      if (canConfirm) {
         confirmBtn.disabled = false;
         confirmBtn.className = "w-full bg-[#f29900] hover:bg-[#e68a00] text-slate-950 font-black py-3.5 rounded-2xl transition text-xs flex items-center justify-center space-x-2 shadow-lg active:scale-95";
       } else {
@@ -2410,26 +2466,32 @@
       container.innerHTML = targetArray.map((url, i) => `
         <div onclick="selectPodPhoto(${i})" class="relative shrink-0 w-14 h-14 rounded-xl overflow-hidden border-2 ${i === activePreviewIndex ? 'border-amber-400 ring-2 ring-amber-400/40' : 'border-slate-700'} cursor-pointer group">
           <img src="${url}" class="w-full h-full object-cover" alt="Thumb ${i+1}">
-          <!-- No trash icon for receipt mode per instructions -->
-          ${cameraMode === 'site' ? `<button type="button" onclick="removePodPhoto(${i}, event)" class="absolute top-1 right-1 w-4 h-4 bg-black/80 text-white rounded-full flex items-center justify-center text-[8px] hover:bg-red-600 transition" title="Delete Photo">✕</button>` : ''}
+          <button type="button" onclick="removePodPhoto(${i}, event)" class="absolute top-1 right-1 w-4 h-4 bg-black/80 text-white rounded-full flex items-center justify-center text-[8px] hover:bg-red-600 transition" title="Remove or retake photo">✕</button>
         </div>
       `).join('');
     }
 
     function confirmPodPhotos() {
       const targetArray = cameraMode === 'site' ? state.epod.sitePhotos : state.epod.receiptPhotos;
-      if (targetArray.length === 0) return;
-      
-      closePodCaptureModal();
+      const trip = state.trips.find(t => t.id === state.selectedTripId);
+      const dropoff = trip?.dropoffs?.find(d => d.id === state.selectedDropoffId);
+
+      if (cameraMode === 'site' && targetArray.length === 0) return;
+      if (cameraMode === 'receipt' &&
+        (!dropoff || targetArray.length !== getRequiredReceiptPhotoCount(dropoff))) return;
       
       if (cameraMode === 'site') {
+          closePodCaptureModal();
           state.epod.step2 = true;
           document.getElementById('badge-step-2').classList.remove('hidden');
           renderSitePhotos();
           unlockStep(3);
       } else {
+          dropoff.signedReceiptPhotos = [...targetArray];
+          dropoff.signedReceiptPhotosConfirmed = true;
           state.epod.step3 = true;
           document.getElementById('badge-step-3').classList.remove('hidden');
+          closePodCaptureModal();
           renderReceiptPhotos();
       }
       checkNextButtonState();
@@ -2461,24 +2523,24 @@
       const list = document.getElementById('epod-receipt-photos-list');
       if (!list) return;
 
+      const trip = state.trips.find(t => t.id === state.selectedTripId);
+      const dropoff = trip?.dropoffs?.find(d => d.id === state.selectedDropoffId);
       const count = state.epod.receiptPhotos.length;
-      if (count > 0) {
-        // Space-saving compact layout: display ONLY the first captured image + dynamic total count
-        const countText = `${count} ${count === 1 ? 'image' : 'images'}`;
-        list.innerHTML = `
-          <div id="epod-receipt-card-container" class="relative rounded-lg overflow-hidden border border-emerald-300 bg-emerald-50/50 p-2 flex items-center space-x-3">
-            <img id="epod-receipt-first-thumb" src="${state.epod.receiptPhotos[0]}" class="w-12 h-12 object-cover rounded-md border border-indigo-300 shrink-0" alt="Receipt Photo 1">
-            <div class="flex-1 min-w-0">
-              <div id="epod-receipt-count" class="text-[11px] font-bold text-emerald-900 flex items-center">
-                <i class="fa-solid fa-file-signature text-emerald-600 mr-1.5 shrink-0"></i>
-                <span>${countText}</span>
-              </div>
-            </div>
+      const requiredCount = getRequiredReceiptPhotoCount(dropoff);
+      const thumbnails = state.epod.receiptPhotos.map((photo, index) => `
+        <img ${index === 0 ? 'id="epod-receipt-first-thumb"' : `id="epod-receipt-thumb-${index + 1}"`}
+          src="${photo}" class="w-12 h-12 object-cover rounded-md border border-indigo-300 shrink-0"
+          alt="Receipt Photo ${index + 1}">
+      `).join('');
+      list.innerHTML = `
+        <div id="epod-receipt-card-container" class="rounded-lg border border-emerald-300 bg-emerald-50/50 p-2 space-y-2">
+          <div id="epod-receipt-count" class="text-[11px] font-bold text-emerald-900 flex items-center">
+            <i class="fa-solid fa-file-signature text-emerald-600 mr-1.5 shrink-0"></i>
+            <span>${count}/${requiredCount} photos captured</span>
           </div>
-        `;
-      } else {
-        list.innerHTML = '';
-      }
+          <div class="flex items-center space-x-2 overflow-x-auto custom-scrollbar">${thumbnails}</div>
+        </div>
+      `;
     }
 
     /* STEP 4: Receiver Signature modal, preview, Remarks & Validation */
@@ -2736,10 +2798,13 @@
       if (!trip) return;
 
       const dropoff = trip.dropoffs?.find(d => d.id === state.selectedDropoffId);
-      if (dropoff) {
-          dropoff.status = 'COMPLETED';
-          dropoff.receiver = document.getElementById('receiver-name').value || 'Jane Doe';
-      }
+      if (!dropoff || dropoff.status === 'COMPLETED') return;
+      if (!dropoff.signedReceiptPhotosConfirmed ||
+        !Array.isArray(dropoff.signedReceiptPhotos) ||
+        dropoff.signedReceiptPhotos.length !== getRequiredReceiptPhotoCount(dropoff)) return;
+
+      dropoff.status = 'COMPLETED';
+      dropoff.receiver = document.getElementById('receiver-name').value || 'Jane Doe';
       
       const allCompleted = trip.dropoffs && trip.dropoffs.every(d => (d.status === 'COMPLETED'));
 
@@ -2752,6 +2817,28 @@
         if(msgEl) msgEl.innerText = "All drop-offs completed successfully.";
       } else {
         setTripStatus(trip, 'IN_TRANSIT'); // Keep the original multi-drop return to transit.
+        const notificationBody = `ePOD successfully submitted - ${trip.id} - ${dropoff.title}`;
+        addNotification(
+          'Drop-Off Completed',
+          notificationBody,
+          'fa-solid fa-circle-check text-emerald-600',
+          `${trip.id}:drop-off-completed:${dropoff.id}`
+        );
+        const notification = {
+          type: 'TRIP_STATUS_UPDATED',
+          transitionId: `${trip.id}-${++statusTransitionSequence}`,
+          tripId: trip.id,
+          tripNumber: trip.id,
+          clientName: trip.cargo,
+          status: 'Drop-Off Completed',
+          title: 'Drop-Off Completed',
+          body: notificationBody
+        };
+        if (state.currentScreen === 'launcher') {
+          showSimulatedPushNotification(notification);
+        } else {
+          showToast(notification.title, notification.body, notification.tripId);
+        }
         scheduleTripStatusTransition(trip); // Auto-arrive at the next pending drop-off.
         const titleEl = document.getElementById('success-page-title');
         if(titleEl) titleEl.innerText = "Delivery Completed!";
@@ -3406,11 +3493,14 @@
       "Notification Bell": "#btn-epod-notif",
       "Notification Count Badge": "#notification-badge",
       "Notification Page Header": "#view-notifications h1",
+      "Notif Back Button": "#btn-notif-back",
+      "App Toast Notification Banner": "#toastNotification",
       "Notification Card: New Trip Received": "#full-notification-list [data-notif-type=\"new-trip-received\"]",
       "Notification Card: Trip Dispatched": "#full-notification-list [data-notif-type=\"trip-dispatched\"]",
       "Notification Card: You've Arrived at Pick-up": "#full-notification-list [data-notif-type=\"arrived-at-pickup\"]",
       "Notification Card: In Transit": "#full-notification-list [data-notif-type=\"in-transit\"]",
       "Notification Card: You've Arrived at Drop-off": "#full-notification-list [data-notif-type=\"arrived-at-dropoff\"]",
+      "Notification Card: Drop-Off Completed": "#full-notification-list [data-notif-type=\"drop-off-completed\"]",
       "Notification Card: Trip Completed": "#full-notification-list [data-notif-type=\"trip-completed\"]",
       "Notification Card: Trip Cancelled": "#full-notification-list [data-notif-type=\"trip-cancelled\"]",
       "Notification Card: Dock Assigned": "#full-notification-list [data-notif-type=\"dock-assigned\"]",
@@ -3486,7 +3576,13 @@
       "Step 3: Verification Status Badge": "#badge-step-3",
       "Signed Receipt Camera": "#modal-pod-capture",
       "Signed Receipt Thumbnail": "#epod-receipt-first-thumb",
+      "Signed Receipt Thumbnails": "#epod-receipt-photos-list img",
       "Captured Image Count": "#epod-receipt-count",
+      "Receipt Camera Thumbnail": "#pod-thumbnails-container img",
+      "Receipt Camera Counter": "#pod-images-counter",
+      "Receipt Camera Shutter": "#btn-shutter-pod",
+      "Receipt Photo Remove Button": "#pod-thumbnails-container button",
+      "Receipt Camera Confirm Button": "#btn-pod-confirm",
       "Step 3: Scan Receipt Button": "#btn-camera-receipt",
       "Open Camera": "#btn-camera-receipt",
       
@@ -3511,7 +3607,6 @@
       "Confirm Location Button": "#btn-confirm-location",
       "Mark All Read Button": "#btn-mark-all-read",
       
-      "Notif Back Button": "#btn-notif-back",
       "Drop-off Completion State": "#view-success",
       "Trip Completed Page": "#view-success",
       "Return to Trips Button": "#btn-success-return"
@@ -3540,7 +3635,16 @@
 
     const RTM_MAPPING = {
       "RTM-075-01": { "Menu": ["Trip Navigation Link"] },
-      "RTM-075-02": { "Menu": ["Count badge"] }
+      "RTM-075-02": { "Menu": ["Count badge"] },
+      "RTM-106": {
+        "Notification": ["Notification Card: Drop-Off Completed", "Notification Card: Trip Completed", "App Toast Notification Banner"],
+        "Android Launcher": ["Push Notification Alert", "Persistent OS Notification"]
+      },
+      "RTM-078-09": { "Notification": ["Notification Page Header", "Notif Back Button"] },
+      "RTM-087-13": { "Add ePOD (Steps 1-4)": ["Step 3: Capture Signed Receipt Block", "Capture Signed Receipt", "Open Camera"] },
+      "RTM-087-14": { "Add ePOD (Steps 1-4)": ["Signed Receipt Camera", "Receipt Camera Counter", "Receipt Camera Shutter"] },
+      "RTM-087-15": { "Add ePOD (Steps 1-4)": ["Receipt Camera Thumbnail", "Receipt Photo Remove Button", "Open Camera"] },
+      "RTM-087-16": { "Add ePOD (Steps 1-4)": ["Receipt Camera Confirm Button", "Capture Signed Receipt", "Next Button"] }
     };
 
     function notificationCardUisSpec(trigger, icon, isTripEvent = true, subtitleFormat = "{Client Name} – Trip Number {Trip Number}") {
@@ -3554,7 +3658,9 @@
         sysResponse: "Updates unread styling and the notification count badge without changing the card order.",
         states: "Unread (indigo-tinted card and unread dot), Read (white card and muted icon/text).",
         validation: isTripEvent
-          ? subtitleFormat.includes("{Client Name}") ? "Requires a trip event with its client name and Trip Number." : "Requires a completed trip with its Trip Number."
+          ? subtitleFormat.includes("{Drop-Off Location}")
+            ? "Requires a successful ePOD submission for a drop-off while at least one other drop-off remains incomplete."
+            : subtitleFormat.includes("{Client Name}") ? "Requires a trip event with its client name and Trip Number." : "Requires a completed trip with its Trip Number."
           : "N/A",
         rules: isTripEvent
           ? `Subtitle format: ${subtitleFormat}. Use the trip associated with the event. Preserve event timestamp, newest-first ordering, read state, and prevent duplicate cards for the same trip event.`
@@ -3570,6 +3676,34 @@
       "Android Launcher": {
         purpose: "Simulates Android OS home screen, app launcher icon, and heads-up push notifications.",
         components: {
+          "Push Notification Alert": {
+            type: "OS Heads-up Notification",
+            description: "Transient Driver's App alert displayed over the Android launcher.",
+            behavior: "When a notification arrives while the app is on the launcher, show its title and message. Drop-Off Completed alerts use the same trip number and drop-off name as the in-app card.",
+            interaction: "Tap / Click the alert to launch the app and open the associated trip.",
+            sysResponse: "Dismisses the alert and navigates to the trip details.",
+            states: "Hidden, Visible.",
+            validation: "Drop-Off completion alert requires a successfully submitted ePOD with other drop-offs remaining.",
+            rules: "Use the existing push notification layout and display the event-specific title and message.",
+            navFlow: "Launcher -> Push Notification -> Trip Details",
+            qaNotes: "Verify Drop-Off Completed title and ePOD message appear without changing the existing launcher notification layout.",
+            design: { spacing: "top-12; p-3", rounded: "rounded-2xl", typography: "text-sm title; text-[11px] message" },
+            colors: [{label: "Card", value: "#ffffff"}, {label: "Title", value: "#1e293b"}, {label: "Message", value: "#475569"}]
+          },
+          "Persistent OS Notification": {
+            type: "OS Notification Shade Card",
+            description: "Persistent Driver's App notification displayed in the Android notification shade.",
+            behavior: "Shows the latest Driver's App push title and message; mirrors Drop-Off Completed when that event is delivered as a launcher push.",
+            interaction: "Tap / Click to launch the Driver's App.",
+            sysResponse: "Opens the app from the notification shade.",
+            states: "Visible in the open notification shade.",
+            validation: "Uses the same event title and message as the associated app notification.",
+            rules: "Preserve the existing shade card typography, timestamp, colors, and layout.",
+            navFlow: "Launcher -> Notification Shade -> Driver's App",
+            qaNotes: "Verify the latest Drop-Off Completed title and message are mirrored in the persistent notification.",
+            design: { spacing: "p-4", rounded: "rounded-2xl", typography: "text-sm title; text-xs message" },
+            colors: [{label: "Card", value: "#1e293b"}, {label: "Title", value: "#ffffff"}, {label: "Message", value: "#94a3b8"}]
+          },
           "Driver's App Icon": {
             type: "Launcher Shortcut",
             description: "App entry point on the OS home screen with unexecuted upcoming trip badge.",
@@ -3594,21 +3728,49 @@
         }
       },
       "Notification": {
-        purpose: "In-app notification history for new trip assignments and trip status events.",
+        purpose: "In-app notification history and alerts for trip events, including individual drop-off completion (RTM-106) and return navigation to the Trips module (RTM-078-09).",
         components: {
           "Notification Page Header": {
             type: "Screen Header",
             description: "Notification page header with back navigation and Mark All as Read action.",
             behavior: "Displays the Notifications title above the newest-first notification history.",
-            interaction: "Back returns to the previous app screen; the envelope action marks every notification as read.",
+            interaction: "Back returns to the Trips module; the envelope action marks every notification as read.",
             sysResponse: "Refreshes notification cards and unread badge state.",
             states: "Default.",
             validation: "N/A",
-            rules: "Keep the existing DHL Yellow header and shared notification history behavior.",
-            navFlow: "Trips -> Notification",
-            qaNotes: "Verify the Notification Bell opens this page and Mark All as Read clears unread indicators.",
+            rules: "Keep the existing DHL Yellow header and shared notification history behavior. The back action must navigate to the Trips module, not the home menu.",
+            navFlow: "Trips -> Notification -> Trips",
+            qaNotes: "Verify the Notification Bell opens this page, back returns to Trips, and Mark All as Read clears unread indicators.",
             design: { spacing: "p-4; pt-10 pb-4", rounded: "N/A", typography: "text-lg font-bold tracking-wide" },
             colors: [{label: "Header Background", value: "#FFCC00"}, {label: "Header Text", value: "#0f172a"}]
+          },
+          "Notif Back Button": {
+            type: "Navigation Button",
+            description: "Back arrow on the Notification page.",
+            behavior: "Navigates directly to the Trips module.",
+            interaction: "Tap / Click.",
+            sysResponse: "Shows the trip list and preserves the selected Trips tab.",
+            states: "Default, Pressed.",
+            validation: "N/A",
+            rules: "Always navigate to the Trips module; do not return to the home menu.",
+            navFlow: "Notification -> Trips",
+            qaNotes: "Open Notifications from the trip module and verify the back button returns to Trips.",
+            design: { spacing: "p-1.5", rounded: "rounded-lg", typography: "text-xl" },
+            colors: [{label: "Icon", value: "#0f172a"}, {label: "Pressed Background", value: "rgba(0,0,0,0.1)"}]
+          },
+          "App Toast Notification Banner": {
+            type: "In-App Toast Alert",
+            description: "Temporary clickable alert shown while the Driver's App is active.",
+            behavior: "Successful partial-drop-off ePOD submission displays Drop-Off Completed and its trip number and drop-off name.",
+            interaction: "Tap / Click to open the associated trip.",
+            sysResponse: "Displays the notification for 4.5 seconds and opens trip details when selected.",
+            states: "Hidden, Visible.",
+            validation: "Only successful and complete ePOD submissions for a drop-off with other drop-offs remaining generate this alert.",
+            rules: "Use the existing toast layout and message format: ePOD successfully submitted - {Trip Number} - {Drop-Off Location}. The last drop-off uses Trip Completed instead.",
+            navFlow: "ePOD Submission -> Toast -> Trip Details",
+            qaNotes: "Verify the toast title and message match the Drop-Off Completed notification card.",
+            design: { spacing: "top-4; px-4 py-3", rounded: "rounded-xl", typography: "text-sm title; text-xs message" },
+            colors: [{label: "Background", value: "#1e293b"}, {label: "Title", value: "#ffffff"}, {label: "Message", value: "#cbd5e1"}]
           },
           "Mark All Read Button": {
             type: "Header Action",
@@ -3629,7 +3791,8 @@
           "Notification Card: You've Arrived at Pick-up": notificationCardUisSpec("Created when the trip status becomes ARRIVED_AT_PICKUP.", "#f59e0b"),
           "Notification Card: In Transit": notificationCardUisSpec("Created when the trip status becomes IN_TRANSIT.", "#0891b2"),
           "Notification Card: You've Arrived at Drop-off": notificationCardUisSpec("Created when the trip status becomes ARRIVED_AT_DROPOFF.", "#f59e0b"),
-          "Notification Card: Trip Completed": notificationCardUisSpec("Created when all drop-offs are completed and the trip status becomes COMPLETE or COMPLETED.", "#059669", true, "ePOD successfully submitted - Trip Number {Trip Number}"),
+          "Notification Card: Drop-Off Completed": notificationCardUisSpec("Created when ePOD is successfully submitted for one drop-off while other drop-offs remain incomplete; the last drop-off generates Trip Completed instead.", "#059669", true, "ePOD successfully submitted - {Trip Number} - {Drop-Off Location}"),
+          "Notification Card: Trip Completed": notificationCardUisSpec("Created when the last remaining drop-off is completed and the trip status becomes COMPLETE or COMPLETED.", "#059669", true, "ePOD successfully submitted - {Trip Number}"),
           "Notification Card: Trip Cancelled": notificationCardUisSpec("Created when the trip status becomes CANCELLED or CANCELED.", "#ef4444"),
           "Notification Card: Dock Assigned": notificationCardUisSpec("Created when a dock is assigned to an active trip.", "#f59e0b", false),
           "Notification Card: System Update": notificationCardUisSpec("Created for a system synchronization or update message.", "#64748b", false)
@@ -4259,15 +4422,15 @@
           },
           "Step 3: Capture Signed Receipt Block": {
             type: "Workflow Step Container",
-            description: "Document capture step requiring scanning of the physical Delivery Receipt (DR). Includes Step Icon, Header, Signed Receipt Thumbnails Area, and Open Camera Button.",
-            behavior: "Unlocked after Step 2. Supports dynamic multi-image limits based on SO count.",
-            interaction: "Tap 'Open Camera' to scan physical receipt.",
-            sysResponse: "Displays all captured receipt thumbnails. Enables main Next button.",
+            description: "Signed receipt capture section with a single Open Camera button and a dynamic photo counter based on the current drop-off's Sales Orders.",
+            behavior: "Unlocked after Step 2. Marks the section Completed only after the required receipt photos are captured and confirmed.",
+            interaction: "Tap Open Camera to capture, remove, or retake receipt photos.",
+            sysResponse: "Shows the captured/required count and every photo thumbnail. Enables Next only after the complete set is confirmed.",
             states: "Disabled (Opacity 50%, unclickable), Active, Completed.",
-            validation: "Mandatory signed DR document scan required.",
-            rules: "Limit is tied to the total SO array length of the current drop-off.",
-            navFlow: "Step 3 -> Receipt Camera Modal -> Enables 'Next' Button",
-            qaNotes: "Verify no trash icon exists and limit matches SO count.",
+            validation: "The confirmed photo count must exactly equal the number of SOs on the selected drop-off.",
+            rules: "Required photo count is currentDropoff.sos.length, not the trip-wide SO count. Do not mark Completed before camera confirmation.",
+            navFlow: "Step 3 -> Camera Page -> Confirm required photos -> Step 3 Completed",
+            qaNotes: "Verify 0/3, 1/3, 2/3 and 3/3 states for Drop-Off 1; test removal, replacement, confirmation, and the 2-SO / 1-SO drop-offs.",
             design: { spacing: "p-3.5 space-y-3", rounded: "rounded-xl border", typography: "text-xs font-bold text-slate-800 (Title)" },
             colors: [
               {label: "Container Background", value: "#f8fafc"},
@@ -4282,15 +4445,15 @@
           },
           "Capture Signed Receipt": {
             type: "Workflow Step Container",
-            description: "Document capture step requiring scanning of the physical Delivery Receipt (DR). Features a compact space-saving card layout displaying solely the first captured image thumbnail alongside a dynamic total count, preserving screen height while holding all underlying receipts.",
-            behavior: "Unlocked after Step 2 completion. Enforces dynamic maximum photo limit based on the number of Sales Orders (SOs) on the current trip.",
-            interaction: "Tap 'Open Camera' to capture documents.",
-            sysResponse: "Stores all captured image assets in state.epod.receiptPhotos while rendering only the first image and dynamic count on the card. Enables the Next button.",
+            description: "Current drop-off's signed receipt capture section. It contains one Open Camera button, a required-photo counter, and a thumbnail for every captured photo.",
+            behavior: "Requires one signed receipt photo for each SO associated with the selected drop-off.",
+            interaction: "Tap Open Camera to open the receipt Camera Page.",
+            sysResponse: "Updates the count and thumbnails on capture or removal. Saves the confirmed photo set against the current drop-off.",
             states: "Disabled (Opacity 50%, unclickable), Active, Completed (Badge visible).",
-            validation: "Mandatory minimum 1 signed DR scan required. Maximum limit restricted to the trip's SO count.",
-            rules: "Displays only the first captured photo thumbnail on the card (capturedImages[0]) plus total count. All captured images remain intact for submission.",
-            navFlow: "Step 3 -> Receipt Camera Modal -> Enables 'Next' Button",
-            qaNotes: "Verify card remains compact regardless of whether 1, 2, or 5 images are captured. Verify no separate multiple thumbnails are rendered.",
+            validation: "The photo count must equal the selected drop-off's SO count and be confirmed in the camera.",
+            rules: "Use the current drop-off's SO count (3, 2, or 1 in the sample trip). Keep the section incomplete until exact-count confirmation; persist the confirmed photos per drop-off.",
+            navFlow: "Open Camera -> Capture / Remove / Retake -> Confirm -> Add POD",
+            qaNotes: "Verify all captured images appear, additional capture stops at the limit, and removing a photo disables Confirm until the count is restored.",
             design: { spacing: "p-3.5 space-y-3", rounded: "rounded-xl border", typography: "text-xs font-bold text-slate-800" },
             colors: [
               {label: "Container Background", value: "#f8fafc"},
@@ -4300,16 +4463,16 @@
             ]
           },
           "Signed Receipt Thumbnail": {
-            type: "Image Preview (First Captured Image Only)",
-            description: "Displays exclusively the first captured signed receipt image (capturedImages[0]). Additional receipts remain stored in memory but are not rendered as separate thumbnails to conserve card space.",
-            behavior: "Statically presents the initial scanned receipt. Does not switch to the latest image when additional receipts are captured. Contains no delete/trash action.",
-            interaction: "Read-only image display.",
-            sysResponse: "Renders when state.epod.receiptPhotos has length >= 1.",
-            states: "Hidden (0 images), Visible (>= 1 image).",
-            validation: "Image Limit: Bound by the number of SOs associated with the trip.",
-            rules: "Thumbnail remains fixed to Image 1. Never creates additional thumbnail elements.",
+            type: "Signed Receipt Photo Thumbnail",
+            description: "Representative first thumbnail in the Add POD receipt photo list; the section renders one thumbnail for every captured photo.",
+            behavior: "Reflects the confirmed receipt photos associated with the selected drop-off.",
+            interaction: "Read-only image preview on the Add POD page; photos can be removed or retaken from the Camera Page.",
+            sysResponse: "Renders the saved photo set after confirmation.",
+            states: "No photos, One or more thumbnails.",
+            validation: "Photo set belongs to the selected drop-off and matches its SO count when completed.",
+            rules: "Display all receipt thumbnails; do not hide additional captured images.",
             navFlow: "N/A",
-            qaNotes: "Verify thumbnail dimensions are 48x48px (w-12 h-12), object-cover, rounded-md with a 1px border (#a5b4fc).",
+            qaNotes: "Verify every confirmed image is visible at 48x48px and the count matches the thumbnails.",
             design: { spacing: "w-12 h-12 shrink-0", rounded: "rounded-md (6px)", typography: "Aspect ratio 1:1 (object-cover)" },
             colors: [
               {label: "Border Color", value: "#a5b4fc"},
@@ -4318,13 +4481,13 @@
           },
           "Captured Image Count": {
             type: "Dynamic Counter Indicator",
-            description: "Dynamic text indicator positioned beside the first-image thumbnail reflecting the total number of captured signed receipt documents.",
-            behavior: "Dynamically updates text based on captured array length (e.g., '1 image', '2 images', '5 images', '10 images').",
+            description: "Counter in the Add POD receipt section showing captured photos against the current drop-off's required SO count.",
+            behavior: "Displays and updates as captured/required photos (for example, 0/3, 1/3, or 3/3).",
             interaction: "Read-only informational text.",
-            sysResponse: "Updates immediately upon confirming photos in the camera modal.",
-            states: "Visible whenever images exist (count >= 1).",
-            validation: "Must match state.epod.receiptPhotos.length exactly.",
-            rules: "Singular 'image' when count === 1; plural 'images' when count > 1.",
+            sysResponse: "Updates immediately after each capture or removal.",
+            states: "Visible for zero or more captured photos.",
+            validation: "Captured count is state.epod.receiptPhotos.length; required count is the selected drop-off's SO count.",
+            rules: "Format: {Captured Count}/{Required Count} photos captured.",
             navFlow: "N/A",
             qaNotes: "Confirm count updates dynamically without hardcoded values.",
             design: { spacing: "pl-1.5 leading-tight", rounded: "N/A", typography: "text-[11px] font-bold" },
@@ -4335,20 +4498,104 @@
           },
           "Open Camera": {
             type: "Action Button",
-            description: "Button that launches the multi-image receipt camera modal up to the trip's SO count.",
-            behavior: "Opens camera viewfinder with SO-based limit.",
+            description: "Single button in Capture Signed Receipt that opens the Camera Page for the selected drop-off.",
+            behavior: "Opens the receipt camera with a photo limit equal to the selected drop-off's SO count.",
             interaction: "Tap / Click",
             sysResponse: "Opens modal-pod-capture in receipt mode.",
             states: "Default, Active/Hover.",
             validation: "Requires Step 2 completed.",
-            rules: "Disabled in viewfinder once captured count equals the trip's SO count.",
-            navFlow: "Capture Signed Receipt -> Camera Modal",
-            qaNotes: "Verify modal shutter disables at SO count limit.",
+            rules: "Use only the current drop-off's SO count. The camera shutter is disabled at the required count and becomes available again after a photo is removed.",
+            navFlow: "Capture Signed Receipt -> Camera Page",
+            qaNotes: "Verify Drop-Off 1 opens at 0/3; Drop-Off 2 and 3 use 2 and 1 photos respectively.",
             design: { spacing: "w-full py-2.5", rounded: "rounded-lg", typography: "text-xs font-bold" },
             colors: [
               {label: "Background", value: "#f1f5f9"},
               {label: "Text Color", value: "#334155"}
             ]
+          },
+          "Signed Receipt Camera": {
+            type: "Camera Page",
+            description: "Full-screen receipt camera view with a live preview, photo strip, capture control, counter, and Confirm button.",
+            behavior: "Limits captures to the number of SOs on the current drop-off.",
+            interaction: "Capture a photo, select a thumbnail, remove or retake it, then confirm the complete set.",
+            sysResponse: "Updates thumbnails and captured/required count; disables capture at the limit and enables Confirm only at the exact required count.",
+            states: "Empty, Partially Captured, Complete, Confirmed.",
+            validation: "Confirm requires captured count to equal the selected drop-off's SO count.",
+            rules: "Back returns to Add POD while retaining the current photo draft and counter. Confirm saves the complete photo set to the selected drop-off and marks the section Completed.",
+            navFlow: "Add POD -> Camera Page -> Confirm -> Add POD",
+            qaNotes: "For three SOs, verify Confirm stays disabled at 0/3, 1/3, and 2/3 and enables at 3/3.",
+            design: { spacing: "p-4; pb-8", rounded: "rounded-2xl thumbnails", typography: "text-[11px] counter; text-xs Confirm" },
+            colors: [{label: "Camera Background", value: "#000000"}, {label: "Capture Accent", value: "#fbbf24"}]
+          },
+          "Receipt Camera Thumbnail": {
+            type: "Camera Photo Thumbnail",
+            description: "Selectable thumbnail for each receipt photo captured during the current camera session.",
+            behavior: "Selecting a thumbnail displays that photo in the camera preview.",
+            interaction: "Tap a thumbnail to preview it; tap its remove control to discard and retake.",
+            sysResponse: "Updates the selected preview and current photo counter.",
+            states: "Selected, Unselected, Removable.",
+            validation: "Only captured photos for the current drop-off are displayed.",
+            rules: "Render one thumbnail per captured photo and provide a remove control on every thumbnail.",
+            navFlow: "Camera Page",
+            qaNotes: "Verify each photo has a thumbnail and can be removed independently.",
+            design: { spacing: "w-14 h-14; space-x-3", rounded: "rounded-xl", typography: "thumbnail image" },
+            colors: [{label: "Selected Border", value: "#fbbf24"}, {label: "Unselected Border", value: "#334155"}]
+          },
+          "Receipt Camera Counter": {
+            type: "Dynamic Camera Counter",
+            description: "Camera Page counter showing captured receipt photos against the current drop-off's SO count.",
+            behavior: "Updates after every capture or removal, such as 0/3 Photos Captured through 3/3 Photos Captured.",
+            interaction: "Read-only.",
+            sysResponse: "Reflects the current draft photo count and required count.",
+            states: "Empty, Partial, Complete.",
+            validation: "Required count equals currentDropoff.sos.length.",
+            rules: "Never use the trip-wide SO count or a fixed receipt photo limit.",
+            navFlow: "Camera Page",
+            qaNotes: "Check each count transition and per-drop-off limit.",
+            design: { spacing: "px-1", rounded: "N/A", typography: "text-[11px] font-bold" },
+            colors: [{label: "Counter Text", value: "#ffffff"}]
+          },
+          "Receipt Camera Shutter": {
+            type: "Camera Capture Control",
+            description: "Camera shutter for adding a signed receipt photo.",
+            behavior: "Captures only while the current drop-off's required photo count has not been reached.",
+            interaction: "Tap / Click to capture.",
+            sysResponse: "Adds a photo and thumbnail and increments the counter.",
+            states: "Enabled below limit, Disabled at limit.",
+            validation: "Maximum equals currentDropoff.sos.length.",
+            rules: "Removing a photo re-enables capture until the required count is reached again.",
+            navFlow: "Camera Page",
+            qaNotes: "Verify no additional image can be added at 3/3, 2/2, or 1/1.",
+            design: { spacing: "w-14 h-14", rounded: "rounded-2xl", typography: "text-xl camera icon" },
+            colors: [{label: "Capture Accent", value: "#fbbf24"}]
+          },
+          "Receipt Photo Remove Button": {
+            type: "Photo Removal Control",
+            description: "Remove control displayed on every camera thumbnail.",
+            behavior: "Removes the selected receipt photo from the unconfirmed camera set.",
+            interaction: "Tap / Click.",
+            sysResponse: "Decrements the photo count, disables Confirm until the required count is restored, and makes the shutter available.",
+            states: "Visible on each captured thumbnail.",
+            validation: "Cannot remove a photo that is not in the current drop-off's camera set.",
+            rules: "Retake by removing the existing photo and capturing a replacement; completion remains pending until reconfirmed.",
+            navFlow: "Camera Page -> Remove -> Retake",
+            qaNotes: "At 3/3, remove one photo and verify 2/3, disabled Confirm, and enabled shutter.",
+            design: { spacing: "top-1 right-1; w-4 h-4", rounded: "rounded-full", typography: "text-[8px]" },
+            colors: [{label: "Control Background", value: "#000000"}, {label: "Hover Background", value: "#dc2626"}]
+          },
+          "Receipt Camera Confirm Button": {
+            type: "Camera Confirmation Button",
+            description: "Confirms the complete set of signed receipt photos for the current drop-off.",
+            behavior: "Disabled until captured count exactly matches the current drop-off's SO count.",
+            interaction: "Tap / Click Confirm.",
+            sysResponse: "Saves all photos to the selected drop-off, marks Capture Signed Receipt Completed, and returns to Add POD.",
+            states: "Disabled below the required count, Enabled at the required count.",
+            validation: "Captured count must equal currentDropoff.sos.length.",
+            rules: "Partial or excess sets cannot be confirmed. Photo confirmation is drop-off-specific.",
+            navFlow: "Camera Page -> Confirm -> Add POD",
+            qaNotes: "Verify 0/3, 1/3, and 2/3 are disabled; 3/3 confirms and shows the Step 3 Completed badge.",
+            design: { spacing: "w-full py-3.5", rounded: "rounded-2xl", typography: "text-xs font-black" },
+            colors: [{label: "Enabled Background", value: "#f29900"}, {label: "Disabled Background", value: "#334155"}]
           },
           "Next Button": {
             type: "Page-Level Workflow Action",
@@ -5031,7 +5278,12 @@
       compSelect.innerHTML = '';
       
       if (!screenName || !UIS_DATA[screenName]) return;
-      const components = Object.keys(UIS_DATA[screenName].components);
+      const availableComponents = Object.keys(UIS_DATA[screenName].components);
+      const rtm = document.getElementById('uis-rtm-select').value;
+      const mappedComponents = RTM_MAPPING[rtm]?.[screenName];
+      const components = mappedComponents
+        ? mappedComponents.filter(name => availableComponents.includes(name))
+        : availableComponents;
       components.forEach(name => {
         const o = document.createElement('option');
         o.value = name; o.textContent = name;
